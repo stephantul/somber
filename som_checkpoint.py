@@ -48,37 +48,42 @@ class Som(object):
         learning_rate = self.learning_rate
 
         # First history
-
-        history = []
-
-        epoch_time = 10
+        history = [self.map_weights()]
+        history_bmu = []
+        prev_bmus = None
 
         for epoch in range(num_epochs):
 
             logger.info("Epoch {0}".format(epoch))
+
+            start = time.time()
 
             # Calculate the radius to see which BMUs attract one another
             map_radius = self.scaling_factor * np.exp(-epoch / self.scaler)
 
             # Create the helper grid, which absolves the need for expensive
             # euclidean products
-            self.grid, self.grid_distances = self._distance_grid(map_radius)
+            self.grid, self.grid_distances = self._create_grid(map_radius)
 
             # Get the indices of the Best Matching Units given the data.
             # bmus = self._get_bmus(data, self.weights)
 
-            weights_summed_squared = np.sum(np.power(self.weights, 2), axis=1)
-
-            bmus = self._get_bmus(data, self.weights, weights_summed_squared)
+            if not prev_bmus:
+                euclid = self._euclid(data, self.weights)
+                prev_bmus = [np.argsort(probas)[:1000] for probas in euclid]
+                bmus = [bmu[0] for bmu in prev_bmus]
+            else:
+                euclid = self._euclid(data, self.weights, prev_bmus)
+                bmus = [np.argmin(bmu) for bmu in euclid]
 
             # Convert the indices of the BMUs to coordinates (x, y)
             coords = self._indices_to_coords(bmus)
 
+            logger.info("Setup time: {0}".format(time.time() - start))
+
             start = time.time()
 
-            use_progressbar = epoch_time > 4
-
-            for vbmu_idx in progressbar(zip(data, coords), use=use_progressbar):
+            for vbmu_idx in progressbar(zip(data, coords)):
 
                 vector, bmu_idx = vbmu_idx
                 x, y = bmu_idx
@@ -91,19 +96,19 @@ class Som(object):
                 # Update all units which are in range
                 self._update(vector, self.weights, indices, influence, learning_rate)
 
+            else:
+                logger.info("Training epoch {0}/{1} took {2:.2f} seconds".format(epoch, num_epochs, time.time() - start))
+
             # Update learning rate
             learning_rate = self.learning_rate * np.exp(-epoch/num_epochs)
 
             if epoch % return_history == 0:
-                history.append((self.predict(data), np.copy(self.weights)))
-
-            epoch_time = time.time() - start
-            logger.info("Training epoch {0}/{1} took {2:.2f} seconds".format(epoch, num_epochs, epoch_time))
+                history.append((self.predict(data), self.weights))
 
         self.trained = True
 
         if return_history:
-            return history
+            return history, history_bmu
 
     def predict(self, x):
         """
@@ -114,17 +119,18 @@ class Som(object):
         :return: A list of indices
         """
 
+        if not self.trained:
+            raise ValueError("Not trained yet")
+
         # Return the indices of the BMU which matches the input data most
-        weights_summed_squared = np.sum(np.power(self.weights, 2), axis=1)
-        return np.array(self._get_bmus(x, self.weights, weights_summed_squared))
+        return self._get_bmus(x, self.weights)
 
     def predict_pseudo_proba(self, x):
 
         if not self.trained:
             raise ValueError("Not trained yet")
 
-        weights_summed_squared = np.sum(np.power(self.weights, 2), axis=1)
-        return dict(enumerate(self._euclid(x, self.weights, weights_summed_squared)))
+        return dict(enumerate(self._euclid(x, self.weights)))
 
     def map_weights(self):
         """
@@ -196,7 +202,7 @@ class Som(object):
 
         return self._coords_to_indices(zip(temp_x, temp_y)), distances
 
-    def _distance_grid(self, radius):
+    def _create_grid(self, radius):
         """
         Creates a grid for easy processing of nearest neighbor searches.
 
@@ -285,7 +291,7 @@ class Som(object):
 
         return weights
 
-    def _get_bmus(self, x, weights, y2):
+    def _get_bmus(self, x, weights):
         """
         Gets the best matching units, based on euclidean distance.
 
@@ -294,18 +300,22 @@ class Som(object):
         :return: A list of integers, representing the indices of the best matching units.
         """
         # return [np.argmax(v) for v in weights.dot(x.T)]
-        return np.argpartition(self._euclid(x, weights, y2), 1, axis=0)[0]
+        return [np.argmin(probas) for probas in self._euclid(x, weights)]
 
     @staticmethod
-    def _euclid(x, weights, weights_squared):
+    def _euclid(x, weights, bmu_histories=None):
 
-        return np.dot(weights, x.T) * -2 + weights_squared.reshape(weights_squared.shape[0], 1)
+        if bmu_histories:
+            [np.linalg.norm(weights[bmu_history] - vector, axis=1) for bmu_history, vector in zip(bmu_histories, x)]
+        return [np.linalg.norm(weights - vector, axis=1) for vector in x]
 
 if __name__ == "__main__":
 
     logging.basicConfig(level=logging.INFO)
 
-    colors = np.array(
+    import pandas as pd
+
+    '''colors = np.array(
          [[0., 0., 0.],
           [0., 0., 1.],
           [0., 0., 0.5],
@@ -320,28 +330,16 @@ if __name__ == "__main__":
           [1., 1., 1.],
           [.33, .33, .33],
           [.5, .5, .5],
-          [.66, .66, .66]])
-
-    colors = np.array(colors)
+          [.66, .66, .66]])'''
 
     '''colors = []
 
     for x in range(10):
         for y in range(10):
             for z in range(10):
-                colors.append((x/10, y/10, z/10))
+                colors.append((x/10, y/10, z/10))'''
 
-    colors = np.array(colors)'''
-
-    '''addendum = np.arange(len(colors) * 10).reshape(len(colors) * 10, 1) / 10
-
-    colors = np.array(colors)
-    colors = np.repeat(colors, 10).reshape(colors.shape[0] * 10, colors.shape[1])
-
-    print(colors.shape, addendum.shape)
-
-    colors = np.hstack((colors,addendum))
-    print(colors.shape)'''
+    # colors = np.array(colors)
 
     color_names = \
         ['black', 'blue', 'darkblue', 'skyblue',
@@ -349,14 +347,38 @@ if __name__ == "__main__":
          'cyan', 'violet', 'yellow', 'white',
          'darkgrey', 'mediumgrey', 'lightgrey']
 
-    s = Som(50, 50, 3, 0.1)
+
+    dlen = 700
+    tetha = np.random.uniform(low=0,high=2*np.pi,size=dlen)[:,np.newaxis]
+    X1 = 3*np.cos(tetha)+ .22*np.random.rand(dlen,1)
+    Y1 = 3*np.sin(tetha)+ .22*np.random.rand(dlen,1)
+    Data1 = np.concatenate((X1,Y1),axis=1)
+
+    X2 = 1*np.cos(tetha)+ .22*np.random.rand(dlen,1)
+    Y2 = 1*np.sin(tetha)+ .22*np.random.rand(dlen,1)
+    Data2 = np.concatenate((X2,Y2),axis=1)
+
+    X3 = 5*np.cos(tetha)+ .22*np.random.rand(dlen,1)
+    Y3 = 5*np.sin(tetha)+ .22*np.random.rand(dlen,1)
+    Data3 = np.concatenate((X3,Y3),axis=1)
+
+    X4 = 8*np.cos(tetha)+ .22*np.random.rand(dlen,1)
+    Y4 = 8*np.sin(tetha)+ .22*np.random.rand(dlen,1)
+    Data4 = np.concatenate((X4,Y4),axis=1)
+
+    DataCL2 = np.concatenate((Data1,Data2,Data3,Data4),axis=0)
+
+    s = Som(20, 20, 2, 0.3)
     start = time.time()
-    history = s.fit(100, colors, return_history=10)
+    history = s.fit(400, DataCL2, return_history=10)
 
     # bmu_history = np.array(bmu_history).T
     print("Took {0} seconds".format(time.time() - start))
 
-    '''from visualization.umatrix import UMatrixView
+    # import matplotlib.pyplot as plt
+    p = s.predict(DataCL2)
+
+    from visualization.umatrix import UMatrixView
 
     for idx, x_w in enumerate(history):
 
@@ -364,6 +386,4 @@ if __name__ == "__main__":
 
         view = UMatrixView(500, 500, 'dom')
         view.create(weight, DataCL2, s.width, s.height, x)
-        view.save("junk_viz/_{0}.svg".format(idx))
-
-        print("Made {0}".format(idx))'''
+        view.save("_{0}.svg".format(x))
