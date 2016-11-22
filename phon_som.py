@@ -1,37 +1,54 @@
+import numpy as np
 import logging
+import cProfile
 
 from som import Som
-from preprocessing.pron_to_dictionary import pron_to_dictionary
-from preprocessing.pythonic_patpho import PatPho
-from collections import OrderedDict
+from hebbian import Hebbian
+from preprocessing.sample_from_corpus import sample_sentences_from_corpus
+from preprocessing.corpus import read_carmel
+from preprocessing.patpho import PatPho
+from preprocessing.ortho import Orthographizer
 from itertools import chain
-from visualization import umatrix
 
 
 if __name__ == "__main__":
 
-    logging.basicConfig(level=logging.INFO)
+    english = read_carmel("data/dpc_en_carmel.txt", "data/dpc_en_carmelled.txt")
+    dutch = read_carmel("data/dpc_nl_carmel.txt", "data/dpc_nl_carmelled.txt")
 
-    dutch = OrderedDict(pron_to_dictionary("data/dpl.cd"))
-    english = OrderedDict(pron_to_dictionary("data/epl.cd", phon_indices=(11, 7)))
+    max_o = 10
+    max_phon = 3
 
-    p = PatPho(max_length=3)
+    phones = set()
+    for x in chain(english.values(), dutch.values()):
+        phones.update(x)
 
-    english = {k: v for k, v in english.items() if not set(v).difference(p.phonemes.keys())}
+    o = Orthographizer(max_length=max_o)
+    p_eng = PatPho(english, phones)
+    p_dut = PatPho(dutch, phones)
 
-    X = p.transform(list(english.values()))
+    english = p_eng.dictionary
+    dutch = p_dut.dictionary
 
-    s = Som(50, 50, X.shape[1], 0.3)
-    history = s.fit(50, X, return_history=5)
+    Xeng, Yeng, wordseng = sample_sentences_from_corpus(["data/dpc_en.txt"],
+                                                        p_eng,
+                                                        o,
+                                                        30000)
 
-    from visualization.umatrix import UMatrixView
+    print("Loaded English")
 
-    for idx, x_w in enumerate(history):
+    Xdut, Ydut, wordsdut = sample_sentences_from_corpus(["data/dpc_nl.txt"],
+                                                        p_dut,
+                                                        o,
+                                                        30000)
 
-        x, weight = x_w
+    print("Loaded Dutch")
 
-        view = UMatrixView(500, 500, 'dom')
-        view.create(weight, X, s.width, s.height, x)
-        view.save("junk_viz/_{0}.svg".format(idx))
+    X = np.concatenate([Xeng, Xdut])
+    Y = np.concatenate([Yeng, Ydut])
 
-        print("Made {0}".format(idx))
+    s_phon = Som(25, 25, X.shape[1], 0.3)
+    s_orth = Som(25, 25, Y.shape[1], 0.3)
+
+    h = Hebbian(s_phon, s_orth, 0.3)
+    cProfile.run("h.run_samples(X, Y, samples=10000, num_epochs=10)")

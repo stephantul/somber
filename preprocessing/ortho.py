@@ -1,13 +1,27 @@
 import numpy as np
 
 
-class PatOrth(object):
+class Orthographizer(object):
 
-    def __init__(self, binary=True):
+    def __init__(self, max_length=10):
+        """
+        An orthographic vectorizer which vectorizes according to the 17-segment
+        display, commonly found on a microwave or other cheap electronic devices.
+
+        See Wikipedia:
+
+        :param max_length: The maximum length of words in characters
+        :return:
+        """
 
         self.binarizer = {"A1": 0, "A2": 1, "F": 2, "H": 3, "I": 4, "J": 5, "B": 6, "G1": 7, "G2": 8,
                           "E": 9, "K": 10, "L": 11, "M": 12, "C": 13, "D1": 14, "D2": 15, "DP": 16}
 
+        super().__init__()
+
+        self.maxlen = max_length
+
+        # Features
         self.orth = {"◰": ['A1', 'A2', 'B', 'C', 'D1', 'D2', 'E', 'F', 'G1', 'I'],
                      "◱": ['A1', 'A2', 'B', 'C', 'D1', 'D2', 'E', 'F', 'G1', 'L'],
                      "◲": ['A1', 'A2', 'B', 'C', 'D1', 'D2', 'E', 'F', 'G2', 'L'],
@@ -245,11 +259,16 @@ class PatOrth(object):
                      "²": ['E', 'G2', 'K'],
                      "▣": ['A1', 'A2', 'B', 'C', 'D1', 'D2', 'E', 'F', 'G1', 'G2', 'H', 'I', 'J', 'K', 'L', 'M', 'DP']}
 
-        if binary:
-
-            self.data = {k: self._convert_bin(v) for k, v in self.orth.items()}
+        self.data = {k: self._convert_bin(v) for k, v in self.orth.items()}
 
     def _convert_bin(self, coordinates):
+        """
+        Convert the numerical coordinates, given above, to a
+        binary format.
+
+        :param coordinates: A list of numerical coordinates.
+        :return: A flat numpy array, representing the  converted form.
+        """
 
         d = np.zeros((len(self.binarizer),))
         for c in coordinates:
@@ -257,3 +276,51 @@ class PatOrth(object):
 
         return d
 
+    def check(self, x):
+        """
+        Check whether no illegal characters occur.
+
+        :param x: The string to check
+        :return: A boolean
+        """
+
+        return not set(x).difference(self.data.keys())
+
+    def vectorize_single(self, word):
+        """
+        Vectorize a single word.
+
+        Raises a ValueError if the word is too long.
+
+        :param word: A string of characters
+        :return: A numpy array, representing the concatenated letter representations.
+        """
+
+        if len(word) > self.maxlen:
+            raise ValueError("Too long")
+
+        x = np.zeros((self.maxlen * len(self.binarizer),))
+        for idx, c in enumerate(word):
+            curr = idx * len(self.binarizer)
+            x[curr: curr + len(self.binarizer)] += self.data[c]
+
+        return x
+
+    def vectorize(self, data):
+        """
+        Vectorize an entire corpus.
+
+        :param data: A list of words.
+        :return: A numpy array
+        """
+
+        X = []
+
+        for word in data:
+
+            try:
+                X.append(self.vectorize_single(word))
+            except (KeyError, ValueError):
+                continue
+
+        return np.array(X)

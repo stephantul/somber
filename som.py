@@ -28,84 +28,84 @@ class Som(object):
 
         self.trained = False
 
-    def fit(self, num_epochs, data, return_history=0):
+    def single_cycle(self, x, map_radius, learning_rate, recalc=True):
+        """
+        A single example.
+
+        :param x: The example
+        :param map_radius: The radius at the current epoch, given the learning rate and map size
+        :param learning_rate: The learning rate.
+        :return: The best matching unit
+        """
+
+        # Create the helper grid, which absolves the need for expensive
+        # euclidean products
+        if recalc:
+            self.grid, self.grid_distances = self._distance_grid(map_radius)
+
+        # Get the indices of the Best Matching Unit, given the data.
+        bmu = self._get_bmu(x)
+
+        # Convert the indices of the BMUs to coordinates (x, y)
+        coords = self._index_dict[bmu]
+
+        # Look up which neighbors are close enough to influence
+        indices, scores = self._find_neighbors(coords[0], coords[1])
+        # Calculate the influence
+        influence = self._calculate_influence(scores, map_radius)
+
+        # Update all units which are in range
+        self._update(x, indices, influence, learning_rate)
+
+        return bmu
+
+    def train(self, data, samples=100000, num_epochs=10):
         """
         Fits the SOM to some data for a number of epochs.
         As the learning rate is decreased proportionally to the number
         of epochs, incrementally training a SOM is not feasible.
 
-        :param num_epochs: The number of epochs for which to train
         :param data: The data on which to train
-        :param return_history:
+        :param samples: The number of samples to draw from the data
+        :param num_epochs: The number of epochs to simulate
         :return: None
         """
 
         # Scaler ensures that the neighborhood radius is 0 at the end of training
         # given a square map.
-        self.scaler = num_epochs / np.log(self.scaling_factor)
+
+        epoch_equiv = samples / num_epochs
+
+        self.scaler = samples / np.log(self.scaling_factor)
 
         # Local copy of learning rate.
         learning_rate = self.learning_rate
 
-        # First history
+        sample_range = np.arange(len(data))
 
-        history = []
+        epoch = 0
+        map_radius = self.scaling_factor * np.exp(-epoch / self.scaler)
 
-        epoch_time = 10
+        for sample in progressbar(range(samples)):
 
-        for epoch in range(num_epochs):
+            is_epoch_step = sample and sample % epoch_equiv == 0
 
-            logger.info("Epoch {0}".format(epoch))
+            if is_epoch_step:
+                # Calculate the radius to see which BMUs attract one another
+                map_radius = self.scaling_factor * np.exp(-epoch / self.scaler)
+                epoch += 1
 
-            # Calculate the radius to see which BMUs attract one another
-            map_radius = self.scaling_factor * np.exp(-epoch / self.scaler)
+            x = data[np.random.choice(sample_range)]
 
-            # Create the helper grid, which absolves the need for expensive
-            # euclidean products
-            self.grid, self.grid_distances = self._distance_grid(map_radius)
-
-            # Get the indices of the Best Matching Units given the data.
-            # bmus = self._get_bmus(data, self.weights)
-
-            weights_summed_squared = np.sum(np.power(self.weights, 2), axis=1)
-
-            bmus = self._get_bmus(data, self.weights, weights_summed_squared)
-
-            # Convert the indices of the BMUs to coordinates (x, y)
-            coords = self._indices_to_coords(bmus)
-
-            start = time.time()
-
-            use_progressbar = epoch_time > 4
-
-            for vbmu_idx in progressbar(zip(data, coords), use=use_progressbar):
-
-                vector, bmu_idx = vbmu_idx
-                x, y = bmu_idx
-
-                # Look up which neighbors are close enough to influence
-                indices, scores = self._find_neighbors(x, y)
-                # Calculate the influence
-                influence = self._calculate_influence(scores, map_radius)
-
-                # Update all units which are in range
-                self._update(vector, self.weights, indices, influence, learning_rate)
+            self.single_cycle(x, map_radius, learning_rate, recalc=is_epoch_step or not sample)
 
             # Update learning rate
-            learning_rate = self.learning_rate * np.exp(-epoch/num_epochs)
-
-            if epoch % return_history == 0:
-                history.append((self.predict(data), np.copy(self.weights)))
-
-            epoch_time = time.time() - start
-            logger.info("Training epoch {0}/{1} took {2:.2f} seconds".format(epoch, num_epochs, epoch_time))
+            if is_epoch_step:
+                learning_rate = self.learning_rate * np.exp(-epoch/num_epochs)
 
         self.trained = True
 
-        if return_history:
-            return history
-
-    def predict(self, x):
+    def predict(self, X):
         """
         Predicts node identity for input data.
         Similar to a clustering procedure.
@@ -115,16 +115,7 @@ class Som(object):
         """
 
         # Return the indices of the BMU which matches the input data most
-        weights_summed_squared = np.sum(np.power(self.weights, 2), axis=1)
-        return np.array(self._get_bmus(x, self.weights, weights_summed_squared))
-
-    def predict_pseudo_proba(self, x):
-
-        if not self.trained:
-            raise ValueError("Not trained yet")
-
-        weights_summed_squared = np.sum(np.power(self.weights, 2), axis=1)
-        return dict(enumerate(self._euclid(x, self.weights, weights_summed_squared)))
+        return [self._get_bmu(x) for x in X]
 
     def map_weights(self):
         """
@@ -171,10 +162,8 @@ class Som(object):
         Finds the nearest neighbors, based on the current grid.
         see _create_grid.
 
-        Simply put, the radius of the nearest neighbor search only changes once per epoch,
-        and hence there is no need to calculate it for every node.
-        So, we create a radius_grid, which we move around, depending on the
-        coordinates of the current node.
+        We only need to recalculate the grid every time we change the
+        radius.
 
         :param center_x: An integer, representing the x coordinate
         :param center_y: An integer, representing the y coordinate
@@ -200,7 +189,7 @@ class Som(object):
         """
         Creates a grid for easy processing of nearest neighbor searches.
 
-        As explained above, the radius only changes once per epoch, and distances
+        The radius only changes once per epoch, and distances
         between nodes do not differ. Hence, there is no reason to calculate
         distances each time we want to know nearest neighbors to some node.
 
@@ -260,7 +249,7 @@ class Som(object):
     def _calculate_influence(distances, map_radius):
         """
         Calculates influence, which can be described as a node-specific
-        learning rate, condition on distance
+        learning rate, conditioned on distance
 
         :param distances: A vector of distances
         :param map_radius: The current radius
@@ -269,37 +258,44 @@ class Som(object):
 
         return np.exp(-(distances ** 2 / map_radius ** 2))
 
-    def _update(self, input_vector, weights, indices, influence, learning_rate):
+    def _update(self, input_vector, indices, influence, learning_rate):
         """
         Updates the nodes, conditioned on the input vector,
         the influence, as calculated above, and the learning rate.
 
-        :return: None
+        :param input_vector: The input vector.
+        :param indices: The indices of the best matching unit and neighborhoods
+        :param influence: The influence the result has on each unit, depending on distance.
+        :param learning_rate: The learning rate.
         """
 
         if not len(indices):
             return
 
-        influence = np.repeat(influence, input_vector.shape[0]).reshape(influence.shape[0], input_vector.shape[0])
-        weights[indices] += influence * (learning_rate * (input_vector - weights[indices]))
+        influence = np.tile(influence, (input_vector.shape[0], 1)).T
+        self.weights[indices] += influence * (learning_rate * (input_vector - self.weights[indices]))
 
-        return weights
-
-    def _get_bmus(self, x, weights, y2):
+    def _get_bmu(self, x):
         """
         Gets the best matching units, based on euclidean distance.
 
         :param x: The input vector
-        :param weights: The weight vectors
-        :return: A list of integers, representing the indices of the best matching units.
+        :return: An integer, representing the index of the best matching unit.
         """
-        # return [np.argmax(v) for v in weights.dot(x.T)]
-        return np.argpartition(self._euclid(x, weights, y2), 1, axis=0)[0]
+
+        return np.argmin(self._euclid(x, self.weights))
 
     @staticmethod
-    def _euclid(x, weights, weights_squared):
+    def _euclid(x, weights):
+        """
+        Calculates the euclidean distance between an input and all the weights in range.
 
-        return np.dot(weights, x.T) * -2 + weights_squared.reshape(weights_squared.shape[0], 1)
+        :param x: The input.
+        :param weights: An array of weights.
+        :return: The distance from the input of each weight.
+        """
+
+        return np.sum(np.square(x - weights), axis=1)
 
 if __name__ == "__main__":
 
@@ -351,7 +347,7 @@ if __name__ == "__main__":
 
     s = Som(50, 50, 3, 0.1)
     start = time.time()
-    history = s.fit(100, colors, return_history=10)
+    s.train(samples=10000, data=colors)
 
     # bmu_history = np.array(bmu_history).T
     print("Took {0} seconds".format(time.time() - start))
