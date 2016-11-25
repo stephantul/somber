@@ -4,6 +4,10 @@ import logging
 import cProfile
 
 from progressbar import progressbar
+from preprocessing.pron_to_dictionary import pron_to_dictionary
+from string import ascii_lowercase
+from collections import OrderedDict
+from itertools import  chain
 
 
 logger = logging.getLogger(__name__)
@@ -11,7 +15,10 @@ logger = logging.getLogger(__name__)
 
 class THSom(object):
 
-    def __init__(self, width, height, dim, alpha, beta):
+    def __init__(self, embedding, indexes, width, height, dim, alpha, beta):
+
+        self.embedding = np.array(embedding)
+        self.indexes = indexes
 
         self.scaling_factor = max(width, height) / 2
         self.scaler = 0
@@ -33,27 +40,98 @@ class THSom(object):
         self.const_dim = np.sqrt(self.weights.shape[-1])
 
         self.trained = False
+        self.radii = {}
 
     def predict_sequence(self, sequence):
 
-        return list(zip(*[self._get_bmu(x) for x in sequence]))[0]
+        bmus = []
 
-    def train(self, data, samples=100000):
+        for x in sequence:
+            bmu, res = self._get_bmus(x)
+            self.prev_activations = res
+            bmus.append(bmu)
+
+        self.prev_activations *= 0
+
+        return bmus
+
+        # return list(zip(*[self._get_bmu(x) for x in sequence]))[0]
+
+    def epoch_step(self, X, map_radius, alpha, beta):
+        """
+        pej
+
+        :param X:
+        :param map_radius:
+        :param alpha:
+        :param beta:
+        :return:
+        """
+
+        '''prev_bmu = 0
+
+        for x, bmu in zip(X, bmus):
+
+            # Convert the indices of the BMUs to coordinates (x, y)
+            coords = self._index_dict[bmu]
+
+            # Look up which neighbors are close enough to influence
+            indices, scores = self._find_neighbors(coords[0], coords[1])
+            # Calculate the influence
+            influence = self._calculate_influence(scores, map_radius)
+
+            # Update all units which are in range
+            self._update(x, indices, influence, alpha, beta, prev_bmu)
+
+        return bmus'''
+
+        # Create the helper grid, which absolves the need for expensive
+        # euclidean products
+
+        self.grid, self.grid_distances = self._distance_grid(map_radius)
+        self.radii = {idx: self._find_neighbors(idx, map_radius) for idx in range(self.width * self.height)}
+
+        temporal_sum = np.sum(self.temporal_weights, axis=1)
+        weights_summed_squared = np.sum(np.power(self.weights, 2), axis=1)
+        # Get the indices of the Best Matching Unit, given the data.
+
+        activations = self._euclid(self.embedding, self.weights, weights_summed_squared).T
+        activations /= activations.max(axis=1).reshape(activations.shape[0], 1)
+        activations = np.vstack([activations, np.zeros((activations[-1].shape[0],))])
+        activations_per_step = [activations[[-1] + indices] for indices in X]
+
+        temporal = [self._temporal(step, temporal_sum) for step in activations_per_step]
+
+        bmu_sequences = []
+
+        for i, x, y in progressbar(zip(X, activations_per_step, temporal)):
+
+            local_input = self.embedding[i]
+            result = self.const_dim / (x + y)
+            bmus = np.argmax(result, axis=1)
+
+            bmu_sequences.append(bmus)
+
+            neighborhoods, influences = zip(*[self.radii[bmu] for bmu in bmus])
+
+            self._update(local_input, neighborhoods, influences, alpha, beta, bmus)
+
+        return bmu_sequences
+
+    def train(self, data, epochs=100000):
         """
         Fits the SOM to some data for a number of epochs.
         As the learning rate is decreased proportionally to the number
         of epochs, incrementally training a SOM is not feasible.
 
         :param data: The data on which to train.
-        :param samples: The number of samples to draw from the training data.
+        :param epochs: The number of samples to draw from the training data.
         :return: None
         """
 
-        print("Number of effective epochs: {0}".format(samples // len(data)))
-
         # Scaler ensures that the neighborhood radius is 0 at the end of training
         # given a square map.
-        self.scaler = samples / np.log(self.scaling_factor)
+        self.scaler = epochs / np.log(self.scaling_factor)
 
         # Local copy of learning rate.
         alpha = self.alpha
@@ -61,39 +139,13 @@ class THSom(object):
 
         # First history
 
-        sample_range = np.arange(len(data))
+        for epoch in range(epochs):
 
-        for sample in progressbar(range(samples)):
+            map_radius = self.scaling_factor * np.exp(-epoch / self.scaler)
 
-            sequence = data[np.random.choice(sample_range)]
-            # Calculate the radius to see which BMUs attract one another
-            # Create the helper grid, which absolves the need for expensive
-
-            map_radius = self.scaling_factor * np.exp(-sample / self.scaler)
-            self.grid, self.grid_distances = self._distance_grid(map_radius)
-
-            for x in sequence:
-
-                # Get the index of the Best Matching Units given the data.
-                bmu, activations = self._get_bmu(x)
-
-                # Convert the indices of the BMUs to coordinates (x, y)
-                coords = self._index_dict[bmu]
-
-                # Look up which neighbors are close enough to influence
-                indices, scores = self._find_neighbors(coords[0], coords[1])
-                # Calculate the influence
-                influence = self._calculate_influence(scores, map_radius)
-
-                # Update all units which are in range
-                self._update(x, indices, influence, alpha, beta, self.prev_bmu)
-                self.prev_bmu = bmu
-                self.prev_activations = activations
-
-            # Update learning rate
-            alpha = self.alpha * np.exp(-sample / samples)
-            beta = self.beta * np.exp(-sample / samples)
-            self.prev_activations *= 0
+            self.epoch_step(X, map_radius, alpha, beta)
+            alpha = self.alpha * np.exp(-epoch / epochs)
+            beta = self.beta * np.exp(-epoch / epochs)
 
         self.temporal_weights = np.array(self.temporal_weights)
         self.trained = True
@@ -117,6 +169,90 @@ class THSom(object):
 
         return np.array(mapped_weights)
 
+    def _update(self, input_vector, neighborhood, influence, alpha, beta, bmus):
+        """
+        Updates the nodes, conditioned on the input vector,
+        the influence, as calculated above, and the learning rate.
+
+        """
+
+        if not len(neighborhood):
+            return
+
+        prev_winner = 0
+
+        for n, i, x, b in zip(neighborhood, influence, input_vector, bmus):
+
+            influence_ = np.tile(i, (x.shape[0], 1)).T
+
+            self.weights[n] += influence_ * (alpha * (x - self.weights[n]))
+
+            # Temporal weights from the current winners to the previous winner are strengthened.
+            # Temporal weights from the current non-winners to the previous winner are weakened
+            # Temporal weights from the previous non-winners to the current neighborhood are weakened.
+
+            temp = set(range(self.width * self.height))
+            outside = np.array(list(temp - set(n)))
+            losers = np.array(list(temp - {prev_winner}))
+
+            # Strengthen Connections from winner to neighborhood
+            self.temporal_weights[prev_winner, n] += i * (alpha * (1 - self.temporal_weights[prev_winner, n] + beta))
+
+            # Weaken Connections from winner to outside-neighborhood
+            self.temporal_weights[prev_winner, outside] -= (alpha * (self.temporal_weights[prev_winner, outside] + beta))
+
+            # Weaken Connections from non-winners to neighborhood
+            indices = np.ix_(losers, n)
+            self.temporal_weights[indices] -= ((1 - i) * (alpha * (self.temporal_weights[indices] + beta)))
+
+            prev_winner = b
+
+        self.weights = self.weights.clip(min=0, max=1)
+        self.temporal_weights = self.temporal_weights.clip(min=0, max=1)
+
+    def _get_bmus(self, x, weights_squared):
+        """
+        Gets the best matching units, based on euclidean distance.
+
+        :param x: The input vector
+        :return: A list of integers, representing the indices of the best matching units.
+        """
+
+        act = self._euclid(x, self.weights, weights_squared)
+        temp = self._temporal()
+
+        # Regularization
+        res = self.const_dim - (act + temp)
+
+        bmu = np.argmax(res)
+        # Normalization
+        res /= res[bmu]
+
+        # Use argmax because of regularization + normalization
+        return bmu, res
+
+    @staticmethod
+    def _euclid(x, weights, squared):
+        """
+        euclidean distance
+
+        :param x:
+        :param weights:
+        :return:
+        """
+
+        return np.dot(weights, x.T) * -2 + squared.reshape(squared.shape[0], 1)
+
+    def _temporal(self, prev_activations, temporal_sum):
+        """
+
+        :return:
+        """
+        return np.sum(prev_activations * temporal_sum)
+
+        # eq: y_i = sum(y_k_t-1 * weight(i, k))
+        # prev_activations = all_y
+
     def _indices_to_coords(self, indices):
         """
         Helper function: converts a list of indices to a list of (x, y) coordinates,
@@ -138,7 +274,7 @@ class THSom(object):
 
         return [self._coord_dict[tup] for tup in coords]
 
-    def _find_neighbors(self, center_x, center_y):
+    def _find_neighbors(self, index, radius):
         """
         Finds the nearest neighbors, based on the current grid.
         see _create_grid.
@@ -153,6 +289,8 @@ class THSom(object):
         :return: a tuple of indices and distances to the nodes at these indices.
         """
 
+        center_x, center_y = self._index_dict[index]
+
         # Add the current coordinates to the grid.
         temp_x = self.grid[0] + center_x
         temp_y = self.grid[1] + center_y
@@ -166,7 +304,7 @@ class THSom(object):
         temp_y = temp_y[mask]
         distances = self.grid_distances[mask]
 
-        return self._coords_to_indices(zip(temp_x, temp_y)), distances
+        return np.array(self._coords_to_indices(zip(temp_x, temp_y))), np.array(self._calculate_influence(distances, radius))
 
     def _distance_grid(self, radius):
         """
@@ -241,100 +379,28 @@ class THSom(object):
 
         return np.exp(-(distances ** 2 / map_radius ** 2))
 
-    def _update(self, input_vector, neighborhood, influence, alpha, beta, prev_winner):
-        """
-        Updates the nodes, conditioned on the input vector,
-        the influence, as calculated above, and the learning rate.
-
-        """
-
-        if not len(neighborhood):
-            return
-
-        influence_ = np.tile(influence, (input_vector.shape[0], 1)).T
-        self.weights[neighborhood] += influence_ * (alpha * (input_vector - self.weights[neighborhood]))
-
-        # Temporal weights from the current winners to the previous winner are strengthened.
-        # Temporal weights from the current non-winners to the previous winner are weakened
-        # Temporal weights from the previous non-winners to the current neighborhood are weakened.
-
-        outside = np.array([True if x not in neighborhood else False for x in np.arange(self.width * self.height)])
-        losers = np.array([True if x != prev_winner else False for x in np.arange(self.width * self.height)])
-
-        # Strengthen Connections from winner to neighborhood
-        self.temporal_weights[prev_winner, neighborhood] += influence * (alpha * (1 - self.temporal_weights[prev_winner, neighborhood] + beta))
-
-        # Weaken Connections from winner to outside-neighborhood
-        self.temporal_weights[prev_winner, outside] -= (alpha * (self.temporal_weights[prev_winner, outside] + beta))
-
-        indices = np.ix_(losers, neighborhood)
-
-        self.temporal_weights[indices] -= ((1 - influence) * (alpha * (self.temporal_weights[indices] + beta)))
-        self.temporal_weights = self.temporal_weights.clip(min=0, max=1)
-
-    def _get_bmu(self, x):
-        """
-        Gets the best matching units, based on euclidean distance.
-
-        :param x: The input vector
-        :param weights: The weight vectors
-        :return: A list of integers, representing the indices of the best matching units.
-        """
-
-        act = self._euclid(x, self.weights)
-        temp = self._temporal()
-
-        # Regularization
-        res = self.const_dim - (act + temp)
-
-        # Normalization
-        res /= np.max(res)
-        bmu = np.argmax(res)
-
-        # Use argmax because of regularization + normalization
-        return bmu, res
-
-    @staticmethod
-    def _euclid(x, weights):
-
-        return np.sqrt(np.sum((x - weights) ** 2, axis=1))
-
-    def _temporal(self):
-
-        return self.prev_activations + np.sum(self.temporal_weights, axis=1)
 
 if __name__ == "__main__":
 
+    import re
+    reg = re.compile(r"\W")
+
     logging.basicConfig(level=logging.INFO)
 
-    X = np.array(
-         [[0., 0., 0.],
-          [0., 0., 1.],
-          [0., 0., 0.5],
-          [0.125, 0.529, 1.0],
-          [0.33, 0.4, 0.67],
-          [0.6, 0.5, 1.0],
-          [0., 1., 0.],
-          [1., 0., 0.],
-          [0., 1., 1.],
-          [1., 0., 1.],
-          [1., 1., 0.],
-          [1., 1., 1.],
-          [.33, .33, .33],
-          [.5, .5, .5],
-          [.66, .66, .66]])
+    eye = np.eye(len(ascii_lowercase)+1)
 
-    sequence_dict = {'a': [0, 0, 1],
-                     'b': [1, 0, 0],
-                     'c': [0, 1, 0]}
+    letters = {k: idx for idx, k in enumerate(ascii_lowercase)}
+    letters['#'] = len(letters)
 
-    sequences = ['aaaaaa', 'bbbaaa']
-    X = np.array([np.array([sequence_dict[c] for c in x]) for x in sequences])
+    wordlist = list(pron_to_dictionary("data/epl.cd", phon_indices=(11, 7)))
+    wordlist = [reg.sub("", x) for x in wordlist]
 
-    s = THSom(30, 30, 3, 0.3, 0.1)
+    X = [np.array([letters[c] for c in word]) for word in wordlist]
+
+    s = THSom(eye, X, width=35, height=35, dim=len(eye), alpha=0.3, beta=0.1)
     start = time.time()
 
-    s.train(samples=1000, data=X)
+    s.train(epochs=100, data=X)
 
     # bmu_history = np.array(bmu_history).T
     print("Took {0} seconds".format(time.time() - start))
