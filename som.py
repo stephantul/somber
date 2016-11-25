@@ -28,11 +28,11 @@ class Som(object):
 
         self.trained = False
 
-    def single_cycle(self, x, map_radius, learning_rate, recalc=True):
+    def epoch_step(self, X, map_radius, learning_rate):
         """
         A single example.
 
-        :param x: The example
+        :param X: a numpy array of examples
         :param map_radius: The radius at the current epoch, given the learning rate and map size
         :param learning_rate: The learning rate.
         :return: The best matching unit
@@ -40,24 +40,23 @@ class Som(object):
 
         # Create the helper grid, which absolves the need for expensive
         # euclidean products
-        if recalc:
-            self.grid, self.grid_distances = self._distance_grid(map_radius)
+        self.grid, self.grid_distances = self._distance_grid(map_radius)
 
+        weights_summed_squared = np.sum(np.power(self.weights, 2), axis=1)
         # Get the indices of the Best Matching Unit, given the data.
-        bmu = self._get_bmu(x)
+        bmus = self._get_bmus(X, weights_summed_squared)
 
         # Convert the indices of the BMUs to coordinates (x, y)
-        coords = self._index_dict[bmu]
-
-        # Look up which neighbors are close enough to influence
-        indices, scores = self._find_neighbors(coords[0], coords[1])
-        # Calculate the influence
-        influence = self._calculate_influence(scores, map_radius)
+        coords = [self._index_dict[bmu] for bmu in bmus]
 
         # Update all units which are in range
-        self._update(x, indices, influence, learning_rate)
+        for coord, x in zip(coords, X):
 
-        return bmu
+            indices, scores = self._find_neighbors(coord[0], coord[1])
+            influence = self._calculate_influence(scores, map_radius)
+            self._update(x, indices, influence, learning_rate)
+
+        return bmus
 
     def train(self, data, samples=100000, num_epochs=10):
         """
@@ -97,7 +96,7 @@ class Som(object):
 
             x = data[np.random.choice(sample_range)]
 
-            self.single_cycle(x, map_radius, learning_rate, recalc=is_epoch_step or not sample)
+            self.epoch_step(x, map_radius, learning_rate, recalc=is_epoch_step or not sample)
 
             # Update learning rate
             if is_epoch_step:
@@ -115,7 +114,8 @@ class Som(object):
         """
 
         # Return the indices of the BMU which matches the input data most
-        return [self._get_bmu(x) for x in X]
+        weights_summed_squared = np.sum(np.power(self.weights, 2), axis=1)
+        return self._get_bmus(X, weights_summed_squared)
 
     def map_weights(self):
         """
@@ -275,7 +275,7 @@ class Som(object):
         influence = np.tile(influence, (input_vector.shape[0], 1)).T
         self.weights[indices] += influence * (learning_rate * (input_vector - self.weights[indices]))
 
-    def _get_bmu(self, x):
+    def _get_bmus(self, x, squared):
         """
         Gets the best matching units, based on euclidean distance.
 
@@ -283,10 +283,10 @@ class Som(object):
         :return: An integer, representing the index of the best matching unit.
         """
 
-        return np.argmin(self._euclid(x, self.weights))
+        return np.argpartition(self._euclid(x, self.weights, squared), 1, axis=0)[0]
 
     @staticmethod
-    def _euclid(x, weights):
+    def _euclid(x, weights, squared):
         """
         Calculates the euclidean distance between an input and all the weights in range.
 
@@ -295,7 +295,7 @@ class Som(object):
         :return: The distance from the input of each weight.
         """
 
-        return np.sum(np.square(x - weights), axis=1)
+        return np.dot(weights, x.T) * -2 + squared.reshape(squared.shape[0], 1)
 
 if __name__ == "__main__":
 
