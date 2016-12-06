@@ -1,11 +1,30 @@
 import numpy as np
 
 from preprocessing.corpus import CorpusWordIter
-from preprocessing.patpho import PatPho
-from preprocessing.ortho import Orthographizer
 
 
-def sample_sentences_from_corpus(paths, o, p, num_words):
+def create_orth_phon_dictionary(dictionary, orthography, phonology):
+    """
+    Create a mapping from strings to their vectorized orthography
+    and phonology.
+
+    :param dictionary: A dictionary from orthography to phonology
+    :param orthography: An initialized orthographic featurizer
+    :param phonology: An initialized phonological featurizer
+    :return:
+    """
+
+    result = {}
+    for k, v in dictionary.items():
+        try:
+            result[k] = (orthography.vectorize_single(k), phonology.vectorize_single(v))
+        except (KeyError, ValueError):
+            continue
+
+    return result
+
+
+def sample_sentences_from_corpus(paths, dictionary, num_words):
     """
     Samples a number of sentences from a corpus iterator.
     Uses a dictionary to look up the phonological forms of words.
@@ -14,27 +33,25 @@ def sample_sentences_from_corpus(paths, o, p, num_words):
     featurizer, are skipped.
 
     :param paths: A list of paths to files.
-    :param dictionary: A dictionary from orthography to phonology strings.
-    :param num_sentences: The number of sentences to sample. If this number is
-        larger than the number of sentences in the corpus, the iterator stops.
+    :param dictionary: A dictionary from orthography to vectorized representations.
+    :param num_words: The number of words to sample. If this number is
+        larger than the number of words in the corpus, the iterator stops.
     :return: An array of phonological forms, an array of orthograpic forms, and a list of words
     all have the same length.
     """
 
-    w = []
     orthography = []
     phonology = []
+    w = []
 
     for word in CorpusWordIter(paths, num_words):
 
         try:
-            loc_o = o.vectorize_single(word)
-            loc_p = p.vectorize_single(word)
-        except (ValueError, KeyError):
-            continue
-
-        orthography.append(loc_o)
-        phonology.append(loc_p)
-        w.append(word)
+            phon, orth = dictionary[word]
+            phonology.append(phon)
+            orthography.append(orth)
+            w.append(word)
+        except KeyError:
+            pass
 
     return np.array(phonology), np.array(orthography), w

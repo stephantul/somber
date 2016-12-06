@@ -7,7 +7,7 @@ from ipapy.ipachar import IPAVowel
 
 class PatPho(object):
 
-    def __init__(self, dictionary, phoneset, max_length=3, left=True):
+    def __init__(self, phoneset, max_length=3, left=True):
         """
         Python re-implementation of of PatPho -- a system for converting sequences of phonemes to vector representations
         that capture phonological similarity of words.
@@ -27,7 +27,6 @@ class PatPho(object):
         self.left = left
 
         self.phonemes, self.vowels, self.phoneset = self._featurize_phoneset(phoneset)
-        self.dictionary = {k: self._prune(v) for k, v in dictionary.items()}
 
     def _prune(self, string):
 
@@ -78,14 +77,14 @@ class PatPho(object):
 
         out = {"vowel": phoneme.is_vowel}
 
-        if type(phoneme) != IPAVowel:
-            out["manner"] = phoneme.manner
-            out["voicing"] = phoneme.voicing
-            out["place"] = phoneme.place
-        else:
+        if type(phoneme) is IPAVowel:
             out["height"] = phoneme.height
             out["backness"] = phoneme.backness
             out["roundness"] = phoneme.roundness
+        else:
+            out["manner"] = phoneme.manner
+            out["voicing"] = phoneme.voicing
+            out["place"] = phoneme.place
 
         return out
 
@@ -115,7 +114,7 @@ class PatPho(object):
         Convert the phoneme sequence to a vector representation.
         """
 
-        x = self.dictionary[x]
+        x = self._prune(x)
 
         if not self.left:
             x = x[::-1]

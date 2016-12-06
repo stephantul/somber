@@ -3,7 +3,7 @@ import sys
 import numpy as np
 
 
-def progressbar(target, width=30, interval=0.01, idx_interval=10, use=True):
+def progressbar(target, width=30, interval=0.01, idx_interval=10, use=True, mult=1):
 
     start = time.time()
     last_update = 0
@@ -33,7 +33,7 @@ def progressbar(target, width=30, interval=0.01, idx_interval=10, use=True):
 
         numdigits = int(np.floor(np.log10(iter_length))) + 1
         barstr = '%%%dd/%%%dd [' % (numdigits, numdigits)
-        bar = barstr % (current, iter_length)
+        bar = barstr % (current * mult, iter_length * mult)
         prog = float(current) / iter_length
         prog_width = int(width * prog)
         if prog_width > 0:
@@ -82,7 +82,7 @@ def progressbar(target, width=30, interval=0.01, idx_interval=10, use=True):
 
             numdigits = int(np.floor(np.log10(iter_length))) + 1
             barstr = '%%%dd/%%%dd [' % (numdigits, numdigits)
-            bar = barstr % (iter_length, iter_length)
+            bar = barstr % (iter_length * mult, iter_length * mult)
             prog = float(iter_length) / iter_length
             prog_width = int(width * prog)
             if prog_width > 0:

@@ -76,11 +76,6 @@ class UMatrixView(MatplotView):
 
         fig, ax = plt.subplots(1, 1)
 
-        '''x_min, y_min = np.min(data, axis=0)
-        new_data = data[:, 0] - x_min, data[:, 1] - y_min
-        new_data = np.array([new_data[0] * (w / new_data[0].max()), new_data[1] * (h / new_data[1].max())])
-
-        plt.scatter(new_data[0, :], new_data[1,:], cmap=plt.cm.get_cmap('coolwarm'), alpha=1)'''
         plt.imshow(umat, cmap=plt.cm.get_cmap('RdYlBu_r'), alpha=1)
 
         if use_contour:

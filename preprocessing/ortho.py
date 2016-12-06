@@ -299,14 +299,17 @@ class Orthographizer(object):
         if len(word) > self.maxlen:
             raise ValueError("Too long")
 
-        x = np.zeros((self.maxlen * len(self.binarizer),))
+        x = np.zeros((self.maxlen, len(self.binarizer),))
         for idx, c in enumerate(word):
-            curr = idx * len(self.binarizer)
-            x[curr: curr + len(self.binarizer)] += self.data[c]
+            x[idx] += self.data[c]
 
         return x
 
-    def vectorize(self, data):
+    def fit_transform(self, data):
+
+        return self.transform(data)
+
+    def transform(self, data):
         """
         Vectorize an entire corpus.
 
@@ -317,10 +320,6 @@ class Orthographizer(object):
         X = []
 
         for word in data:
-
-            try:
-                X.append(self.vectorize_single(word))
-            except (KeyError, ValueError):
-                continue
+            X.append(self.vectorize_single(word))
 
         return np.array(X)

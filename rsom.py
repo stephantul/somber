@@ -1,22 +1,21 @@
 import numpy as np
-import logging
 import time
+import logging
 import cProfile
 
-from som import Som
 from progressbar import progressbar
+from som import Som
 
-logging.basicConfig(level=logging.INFO)
+
+logger = logging.getLogger(__name__)
 
 
-class THSom(Som):
+class Rsom(Som):
 
-    def __init__(self, width, height, dim, learning_rates, beta):
+    def __init__(self, width, height, dim, learning_rate, temp_weight):
 
-        super().__init__(width, height, dim, learning_rates)
-        self.temporal_weights = np.zeros((self.map_dim, self.map_dim))
-        self.const_dim = np.sqrt(self.data_dim)
-        self.beta = beta
+        self.temp_weight = temp_weight
+        super().__init__(width, height, dim, learning_rate)
 
     def epoch_step(self, X, map_radius, learning_rate, batch_size):
         """
@@ -26,6 +25,8 @@ class THSom(Som):
         :param map_radius: The radius at the current epoch, given the learning rate and map size
         :param learning_rate: The learning rate.
         :param batch_size: The batch size
+        :param return_activations: Whether to return activations instead of bmus. For processing in
+         another network.
         :return: The best matching unit
         """
 
@@ -46,15 +47,9 @@ class THSom(Som):
 
         # Make a batch generator.
         accumulator = np.zeros_like(self.weights)
-        temporal_accumulator = np.zeros_like(self.temporal_weights)
         num_updates = 0
 
         num_batches = np.ceil(len(X) / batch_size).astype(int)
-
-        temporal_sum = self.temporal_weights.sum(axis=0)
-
-        tempo = learning_rate * (self.temporal_weights + self.beta)
-        mintempo = learning_rate * (1 - self.temporal_weights + self.beta)
 
         for index in progressbar(range(num_batches), idx_interval=1, mult=batch_size):
 
@@ -62,9 +57,7 @@ class THSom(Som):
             current = X[index * batch_size: (index+1) * batch_size]
 
             # Initial previous activation
-            prev_activations = np.zeros((current.shape[0], self.map_dim))
-
-            prev_bmu = np.zeros((batch_size,), dtype=np.int)
+            prev_activations = np.zeros((current.shape[0], self.map_dim, self.data_dim))
 
             for idx in range(current.shape[1]):
 
@@ -73,40 +66,31 @@ class THSom(Som):
                 influences = []
 
                 # Get the indices of the Best Matching Unit, given the data.
-                bmu_theta, prev_activations, spatial, temporal = self._get_bmus(column,
-                                                                                y=prev_activations,
-                                                                                temporal_sum=temporal_sum)
+                bmu_theta, distances, prev_activations = self._get_bmus(column, previous=prev_activations)
+
+                all_distances += distances.mean(axis=0)
 
                 for bmu in bmu_theta:
 
                     try:
-                        influence_spatial = cache[bmu]
+                        influence = cache[bmu]
                     except KeyError:
 
                         x_, y_ = self._index_dict[bmu]
                         influence = self._calculate_influence(map_radius_squared, center_x=x_, center_y=y_)
-                        influence *= learning_rate
-                        influence_spatial = np.tile(influence, (self.data_dim, 1)).T
-                        cache[bmu] = influence_spatial
+                        influence = np.tile(influence, (self.data_dim, 1)).T * learning_rate
+                        cache[bmu] = influence
 
-                    influences.append(influence_spatial)
+                    influences.append(influence)
 
                 influences = np.array(influences)
 
-                spatial_update = self._update(spatial, influences).mean(axis=0)
-                temporal_update = self._temporal_update(tempo, mintempo, prev_bmu=prev_bmu)
+                update = self._update(prev_activations, influences)
 
-                accumulator += spatial_update
-                temporal_accumulator += temporal_update
+                accumulator += update.mean(axis=0)
                 num_updates += 1
 
-                prev_bmu = bmu_theta
-
         self.weights += (accumulator / num_updates)
-        self.temporal_weights += (temporal_accumulator / num_updates)
-
-        self.weights = self.weights.clip(0.0, 1.0)
-        self.temporal_weights = self.temporal_weights.clip(0.0, 1.0)
 
         return np.array(all_distances / num_updates)
 
@@ -118,33 +102,12 @@ class THSom(Som):
         :return: An integer, representing the index of the best matching unit.
         """
 
-        y = kwargs['y']
-        temporal_sum = kwargs['temporal_sum']
+        differences = self._pseudo_distance(x, self.weights)
 
-        spatial_differences = self._pseudo_distance(x, self.weights)
+        differences = ((1 - self.temp_weight) * kwargs['previous']) + (self.temp_weight * differences)
+        distances = np.sqrt(np.sum(np.square(differences), axis=2))
 
-        temporal_differences = y * temporal_sum
-
-        differences = (self.const_dim - np.sqrt(np.sum(np.square(spatial_differences), axis=2)) + temporal_differences)
-        differences /= differences.max(axis=0)
-
-        return np.argmax(differences, axis=1), differences, spatial_differences, temporal_differences
-
-    @staticmethod
-    def _temporal_update(tempo, mintempo, prev_bmu):
-        """
-
-
-        :param tempo:
-        :param mintempo:
-        :param prev_bmu:
-        :return:
-        """
-
-        update = -tempo
-        update[prev_bmu] += mintempo[prev_bmu]
-
-        return update.T
+        return np.argmin(distances, axis=1), distances, differences
 
     def predict(self, X):
         """
@@ -157,30 +120,18 @@ class THSom(Som):
 
         # Start with a clean buffer.
 
-        prev_activations = np.zeros((X.shape[0], self.map_dim))
+        prev_activations = np.zeros((len(X), self.map_dim, self.data_dim))
 
         all_bmus = []
-        temporal_sum = self.temporal_weights.sum(axis=0)
 
         for idx in range(X.shape[1]):
 
             column = X[:, idx, :]
-            bmus, prev_activations, _, _ = self._get_bmus(column, y=prev_activations, temporal_sum=temporal_sum)
+            bmus, distances, prev_activations = self._get_bmus(column, previous=prev_activations)
 
             all_bmus.append(bmus)
 
         return np.array(all_bmus).T
-
-    def assign_exemplar(self, exemplars, names=()):
-
-        exemplars = np.array(exemplars)
-        distances = self._pseudo_distance(exemplars, self.weights)
-        distances = np.sum(np.square(distances), axis=2)
-
-        if not names:
-            return distances.argmax(axis=0)
-        else:
-            return [names[x] for x in distances.argmax(axis=0)]
 
 if __name__ == "__main__":
 
@@ -210,9 +161,9 @@ if __name__ == "__main__":
     data = np.random.choice(colorpicker, size=(1000, 15))
     data = colors[data]
 
-    s = THSom(30, 30, 3, [1.0], 0.01)
+    s = Rsom(30, 30, 3, [1.0], 1.0)
     start = time.time()
-    cProfile.run("s.train(data, num_epochs=100, batch_size=100)")
+    bmus = s.train(data, num_epochs=100, batch_size=100)
 
     # bmu_history = np.array(bmu_history).T
     print("Took {0} seconds".format(time.time() - start))
