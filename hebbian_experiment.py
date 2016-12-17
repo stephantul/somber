@@ -1,6 +1,6 @@
 import numpy as np
 
-from rsom import Rsom
+from thsom import THSom
 from hebbian import Hebbian
 from preprocessing.phono import Phonologizer
 from preprocessing.ortho import Orthographizer

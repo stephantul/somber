@@ -14,7 +14,6 @@ class THSom(Som):
     def __init__(self, width, height, dim, learning_rates, beta):
 
         super().__init__(width, height, dim, learning_rates)
-        # self.temporal_weights = np.random.uniform(0.0, 1.0, (self.map_dim, self.map_dim))
         self.temporal_weights = np.zeros((self.map_dim, self.map_dim))
         self.const_dim = np.sqrt(self.data_dim)
         self.beta = beta
@@ -25,46 +24,48 @@ class THSom(Som):
 
         :param X: a numpy array of examples
         :param map_radius: The radius at the current epoch, given the learning rate and map size
-        :param learning_rate: The learning rate.
+        :param learning_rates: The learning rate.
         :param batch_size: The batch size
         :return: The best matching unit
         """
 
         alpha, zeta = learning_rates
-        # One accumulator per epoch
+
         influences = self._distance_grid(map_radius) * alpha
         influences = np.asarray([influences] * self.data_dim).transpose((1, 2, 0))
 
-        num_batches = np.ceil(len(X) / batch_size).astype(int)
-
-        # Parallel timelines
-        for index in progressbar(range(num_batches), idx_interval=1, mult=batch_size):
-
-            # Select the current batch.
-            current = X[index * batch_size: (index+1) * batch_size]
+        for x in progressbar(X, idx_interval=1, mult=batch_size):
 
             # Initial previous activation
-            prev_activations = np.zeros((batch_size, self.map_dim))
-            prev_bmu = np.zeros((batch_size,), dtype=int)
+            prev_activations = np.zeros(self.map_dim)
+            prev_bmu = 0
 
-            for idx in range(current.shape[1]):
+            for value in x:
 
-                column = current[:, idx, :]
+                # Get the indices of the Best Matching Unit, given the data.
+                bmu_theta, prev_activations, spatial = self._get_bmus(value, y=prev_activations)
 
-                bmu_theta, prev_activations, spatial = self._get_bmus(column,
-                                                                      y=prev_activations,
-                                                                      temporal_update=self.temporal_weights)
+                spatial_update = self._calculate_update(spatial, influences[bmu_theta])
+                temporal_update = self._temporal_update(self.beta, prev_bmu=prev_bmu, bmu=bmu_theta, zeta=zeta)
 
-                spatial_update = self._calculate_update(spatial, influences[bmu_theta, :])
-                temporal_update = self._temporal_update(batch_size, self.beta, prev_bmu=prev_bmu, bmu=bmu_theta, zeta=zeta)
-
-                self.weights = spatial_update.mean(axis=0)
-                self.temporal_weights += temporal_update.sum(axis=0)
+                self.weights += spatial_update
+                self.temporal_weights += temporal_update
 
                 self.weights = self.weights.clip(0.0, 1.0)
                 self.temporal_weights = self.temporal_weights.clip(0.0, 1.0)
 
                 prev_bmu = bmu_theta
+
+    def _pseudo_distance(self, X, weights):
+        """
+        Calculates the euclidean distance between an input and all the weights in range.
+
+        :param x: The input.
+        :param weights: An array of weights.
+        :return: The distance from the input of each weight.
+        """
+
+        return X - weights
 
     def _get_bmus(self, x, **kwargs):
         """
@@ -75,36 +76,33 @@ class THSom(Som):
         """
 
         y = kwargs['y']
-        spatial_differences = self._pseudo_distance(x, self.weights)
 
-        # TODO: niet verwijderen, domme
+        spatial_differences = self._pseudo_distance(x, self.weights)
 
         temporal_differences = []
 
-        for z in range(len(x)):
+        for i in range(self.map_dim):
 
-            tempo_ = []
+            temp = []
 
-            for i in range(self.map_dim):
+            for h in range(self.map_dim):
 
-                temp = []
+                temp.append(y[h] * self.temporal_weights[i, h])
 
-                for h in range(self.map_dim):
-
-                    temp.append(y[z, h] * self.temporal_weights[i, h])
-
-                tempo_.append(np.sum(temp))
-
-            temporal_differences.append(tempo_)
+            temporal_differences.append(np.sum(temp))
 
         temporal_differences = np.array(temporal_differences)
 
-        differences = (self.const_dim - np.sqrt(np.sum(np.square(spatial_differences), axis=2))) + temporal_differences
-        differences = (differences.T / differences.max(axis=1)).T
+        # print("A: ", temporal_differences)
+        # temporal_differences = y * self.temporal_weights.sum(axis=1)
+        # print("B: ", temporal_differences)
 
-        return np.argmax(differences, axis=1), differences, spatial_differences
+        differences = (self.const_dim - np.sqrt(np.sum(np.square(spatial_differences), axis=1))) + temporal_differences
+        differences /= differences.max()
 
-    def _temporal_update(self, batch_size, beta, prev_bmu, bmu, zeta):
+        return np.argmax(differences, axis=0), differences, spatial_differences
+
+    def _temporal_update(self, beta, prev_bmu, bmu, zeta):
         """
         :param tempo:
         :param mintempo:
@@ -112,9 +110,8 @@ class THSom(Som):
         :return:
         """
 
-        # Changed freeze of current state.
-        update = -np.tile(zeta * (self.temporal_weights + beta), (batch_size, 1)).reshape((batch_size, self.map_dim, self.map_dim))
-        update[np.arange(len(prev_bmu)), bmu, prev_bmu] = zeta * (1.0 - (self.temporal_weights[bmu, prev_bmu] + beta))
+        update = -(zeta * (self.temporal_weights + beta))
+        update[bmu, prev_bmu] = zeta * (1.0 - (self.temporal_weights[bmu, prev_bmu] + beta))
 
         return update
 
@@ -178,15 +175,26 @@ if __name__ == "__main__":
 
     data = np.tile(colors, (100, 1, 1))
 
+    colors = []
+
+    for x in range(10):
+        for y in range(10):
+            for z in range(10):
+                colors.append((x/10, y/10, z/10))
+
+    colors = np.array(colors, dtype=float)
+
     colorpicker = np.arange(len(colors))
 
-    data = colors[np.random.choice(colorpicker, size=15)]
-    data = np.array([data] * 1000)
+    d1 = colors[np.random.choice(colorpicker, size=15)]
+    d2 = colors[np.random.choice(colorpicker, size=15)]
+    d3 = colors[np.random.choice(colorpicker, size=15)]
+    data = np.array([d1, d2, d3] * 100)
     print(data.shape)
 
-    s = THSom(30, 30, 3, [1.0, 0.03], 0.01)
+    s = THSom(20, 20, 3, [1.0, 0.3], 0.01)
     start = time.time()
-    cProfile.run("s.train(data, num_epochs=10, batch_size=1)")
+    s.train(data, num_epochs=1000, batch_size=1)
 
     # bmu_history = np.array(bmu_history).T
     print("Took {0} seconds".format(time.time() - start))

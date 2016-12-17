@@ -1,5 +1,5 @@
 import numpy as np
-# import tensorflow as tf
+import tensorflow as tf
 import time
 import logging
 import cProfile
@@ -10,9 +10,9 @@ from collections import defaultdict
 logger = logging.getLogger(__name__)
 
 
-def expo(value, current_epoch, lam):
+def expo(value, current_epoch, total_epochs):
 
-    return value * np.exp(-current_epoch / lam)
+    return value * np.exp(-current_epoch / total_epochs)
 
 
 def static(value, current_epoch, total_epochs):
@@ -22,42 +22,61 @@ def static(value, current_epoch, total_epochs):
 
 class Som(object):
 
-    def __init__(self, width, height, dim, learning_rates, lrfunc=expo, nbfunc=expo, sigma=None):
+    def __init__(self, width, height, dim, alpha):
 
-        if sigma is not None:
-            self.sigma = sigma
-        else:
-            # Add small constant to sigma to prevent divide by zero for maps of size 2.
-            self.sigma = (max(width, height) / 2.0) + 0.01
+        # Normal components
+        self.scaler = 0
 
-        self.lam = 0
-
-        if type(learning_rates) != list:
-            learning_rates = [learning_rates]
-
-        self.learning_rates = np.array(learning_rates)
+        self.alpha = alpha
+        self.sigma = max(width, height) / 2
 
         self.width = width
         self.height = height
-        self.map_dim = width * height
-
-        self.weights = np.random.uniform(-0.1, 0.1, size=(self.map_dim, dim))
-        self.data_dim = dim
-
-        self.distance_grid = self._calculate_distance_grid()
-
-        self._index_dict = {idx: (idx // self.height, idx % self.height) for idx in range(self.weights.shape[0])}
-        self._coord_dict = defaultdict(dict)
-
-        self.lrfunc = lrfunc
-        self.nbfunc = nbfunc
-
-        for k, v in self._index_dict.items():
-
-            x_, v_ = v
-            self._coord_dict[x_][v_] = k
 
         self.trained = False
+        self.data_dim = dim
+        self.map_dim = width * height
+
+        self._graph = tf.Graph()
+
+    def _initialize_graph(self, batch_size, num_epochs):
+
+        with self._graph.as_default():
+            self.weights = tf.Variable(tf.random_normal([self.map_dim, self.data_dim]))
+            self.vect_input = tf.placeholder("float", [batch_size, self.data_dim])
+            self.epoch = tf.placeholder("float")
+            self.distance_grid = tf.constant(self._calculate_distance_grid())
+
+            tiles = tf.tile(self.vect_input, (1, self.map_dim))
+            reshaped = tf.reshape(tiles, (batch_size, self.map_dim, self.data_dim))
+            spatial_activation = tf.sub(reshaped, self.weights)
+
+            euclidean = tf.sqrt(tf.reduce_sum(tf.square(spatial_activation), 2))
+            bmus = tf.argmin(euclidean, 1)
+
+            _learning_rate_op = tf.exp(tf.div(-self.epoch, num_epochs))
+            _alpha_op = tf.mul(self.alpha, _learning_rate_op)
+            _sigma_op = tf.mul(self.sigma, _learning_rate_op)
+
+            neighborhood_func = tf.exp(tf.div(tf.cast(
+                self.distance_grid, "float32"), tf.square(tf.mul(2.0, _sigma_op))))
+
+            neighbourhood_func = tf.mul(_alpha_op, neighborhood_func)
+
+            influences = tf.gather(neighbourhood_func, bmus)
+
+            influences = tf.tile(influences, (1, self.data_dim))
+            influences = tf.transpose(tf.reshape(influences, (batch_size, self.data_dim, self.map_dim)), (0, 2, 1))
+
+            spatial_delta = tf.reduce_mean(tf.mul(influences, spatial_activation), 0)
+
+            new_weights = tf.add(self.weights,
+                                 spatial_delta)
+            self._training_op = tf.assign(self.weights,
+                                          new_weights)
+
+            self._sess = tf.Session()
+            self._sess.run(tf.initialize_all_variables())
 
     def train(self, X, num_epochs=10, batch_size=100):
         """
@@ -70,97 +89,60 @@ class Som(object):
         :return: None
         """
 
-        # Scaler ensures that the neighborhood radius is 0 at the end of training
-        # given a square map.
-        self.lam = num_epochs / np.log(self.sigma)
-
-        # Local copy of learning rate.
-        learning_rate = self.learning_rates
+        self._initialize_graph(batch_size, num_epochs)
 
         bmus = []
 
         real_start = time.time()
 
-        if np.ndim(X) == 2:
-            X = np.resize(X, (num_batches * batch_size, X.shape[1]))
-        elif np.ndim(X) == 3:
-            X = np.resize(X, (num_batches * batch_size, X.shape[1], X.shape[2]))
+        closest = int(np.ceil(X.shape[0] / batch_size))
+        print("X has {0} instances".format(X.shape[0]))
 
-        print(X.shape)
+        shape = list(X.shape)
+        shape[0] = closest * batch_size
+        X = np.resize(X, shape)
+        print("X was reshaped to {0} instances".format(X.shape[0]))
 
         for epoch in range(num_epochs):
 
-            print("\nEPOCH: {0}/{1}".format(epoch+1, num_epochs))
             start = time.time()
 
-            map_radius = self.nbfunc(self.sigma, epoch, self.lam)
-            print("\nRADIUS: {0}".format(map_radius))
-            bmu = self.epoch_step(X, map_radius, learning_rate, batch_size=batch_size)
-
-            bmus.append(bmu)
-            learning_rate = self.lrfunc(self.learning_rates, epoch, num_epochs)
-
-            print("\nEPOCH TOOK {0:.2f} SECONDS.".format(time.time() - start))
-            print("TOTAL: {0:.2f} SECONDS.".format(time.time() - real_start))
+            self.epoch_step(X, epoch, batch_size)
+            print("EPOCH {0}/{1} TOOK {2} seconds".format(epoch, num_epochs, time.time() - start))
+            print("TOTAL TIME {0}".format(time.time() - real_start))
 
         self.trained = True
 
         return bmus
 
-    def epoch_step(self, X, map_radius, learning_rate, batch_size):
-        """
-        A single example.
-
-        :param X: a numpy array of examples
-        :param map_radius: The radius at the current epoch, given the learning rate and map size
-        :param learning_rate: The learning rate.
-        :param batch_size: The batch size to use.
-        :return: The best matching unit
-        """
-
-        # Calc once per epoch
-        influences = self._distance_grid(map_radius) * learning_rate[0]
-        influences = np.asarray([influences] * self.data_dim).transpose((1, 2, 0))
-
-        # One accumulator per epoch
-        all_activations = []
-
-        # Make a batch generator.
-        accumulator = np.zeros_like(self.weights)
-        num_updates = 0
+    def epoch_step(self, X, epoch, batch_size):
 
         num_batches = np.ceil(len(X) / batch_size).astype(int)
 
         for index in progressbar(range(num_batches), idx_interval=1, mult=batch_size):
+            batch = X[index * batch_size: (index + 1) * batch_size]
 
-            # Select the current batch.
-            batch = X[index * batch_size: (index+1) * batch_size]
-
-            update, differences = self._batch(batch, influences)
-
-            all_activations.extend(np.sqrt(np.sum(np.square(differences), axis=2)))
-            accumulator += update
-            num_updates += 1
-
-        self.weights += (accumulator / num_updates)
-
-        return np.array(all_activations)
+            self._sess.run(self._training_op,
+                           feed_dict={self.vect_input: batch,
+                                      self.epoch: epoch})
 
     def _distance_grid(self, radius):
 
-        p = np.exp(-1.0 * self.distance_grid / (2.0 * radius ** 2)).reshape(self.map_dim, self.map_dim)
+        p = tf.exp(-1.0 * self.distance_grid / (2.0 * radius ** 2)).reshape(self.map_dim, self.map_dim)
+        p = tf.repeat(self.data_dim).reshape(self.map_dim, self.map_dim, self.data_dim)
 
         return p
 
     def _batch(self, batch, influences):
 
         bmus, differences = self._get_bmus(batch)
-        influences = influences[bmus, :]
-        update = self._calculate_update(differences, influences).mean(axis=0)
+
+        influences = influences[bmus]
+        update = self._update(differences, influences).mean(axis=0)
 
         return update, differences
 
-    def _calculate_update(self, input_vector, influence):
+    def _update(self, input_vector, influence):
         """
         Updates the nodes, conditioned on the input vector,
         the influence, as calculated above, and the learning rate.
@@ -169,7 +151,7 @@ class Som(object):
         :param influence: The influence the result has on each unit, depending on distance.
         """
 
-        return input_vector * influence
+        return influence * input_vector
 
     def _get_bmus(self, x):
         """
@@ -191,8 +173,6 @@ class Som(object):
         :param weights: An array of weights.
         :return: The distance from the input of each weight.
         """
-
-        # Correct
         p = np.tile(X, (1, self.map_dim)).reshape((X.shape[0], self.map_dim, X.shape[1]))
         return p - weights
 
@@ -204,7 +184,7 @@ class Som(object):
 
             distance_matrix[i] = self._grid_dist(i).reshape(1, self.map_dim)
 
-        return distance_matrix
+        return -1 * distance_matrix
 
     def _grid_dist(self, index):
 
@@ -248,13 +228,17 @@ class Som(object):
 
         mapped_weights = []
 
-        for x in range(self.width):
-            x *= self.height
-            temp = []
-            for y in range(self.height):
-                temp.append(self.weights[x + y])
+        with self._sess.as_default():
 
-            mapped_weights.append(temp)
+            weights = self.weights.eval()
+
+            for x in range(self.width):
+                x *= self.height
+                temp = []
+                for y in range(self.height):
+                    temp.append(weights[x + y])
+
+                mapped_weights.append(temp)
 
         return np.array(mapped_weights)
 
@@ -262,7 +246,7 @@ if __name__ == "__main__":
 
     logging.basicConfig(level=logging.INFO)
 
-    colors = np.array(
+    '''colors = np.array(
          [[0., 0., 0.],
           [0., 0., 1.],
           [0., 0., 0.5],
@@ -279,17 +263,16 @@ if __name__ == "__main__":
           [.5, .5, .5],
           [.66, .66, .66]])
 
-    colors = np.array(colors)
+    colors = np.array(colors)'''
 
-    '''colors = []
+    colors = []
 
     for x in range(10):
         for y in range(10):
             for z in range(10):
                 colors.append((x/10, y/10, z/10))
 
-    colors = np.array(colors, dtype=float)'''
-    # colors = np.vstack([colors, colors, colors, colors, colors, colors, colors, colors])
+    colors = np.array(colors, dtype=float)
 
     '''addendum = np.arange(len(colors) * 10).reshape(len(colors) * 10, 1) / 10
 
@@ -307,11 +290,9 @@ if __name__ == "__main__":
          'cyan', 'violet', 'yellow', 'white',
          'darkgrey', 'mediumgrey', 'lightgrey']
 
-    s = Som(30, 30, 3, [1.0])
+    s = Som(20, 20, 3, 1.0)
     start = time.time()
-    bmus = s.train(colors, num_epochs=100)
-
-
+    bmus = s.train(colors, batch_size=100, num_epochs=100)
 
     # bmu_history = np.array(bmu_history).T
     print("Took {0} seconds".format(time.time() - start))

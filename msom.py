@@ -19,11 +19,11 @@ class MSom(Som):
         super().__init__(width, height, dim, learning_rate, lrfunc, nbfunc)
 
         self.context_weights = np.zeros_like(self.weights)
+        self.entropy = 0
 
-    def epoch_step(self, X, map_radius, learning_rate, batch_size):
+    def epoch_step(self, X, map_radius, learning_rate, batch_size, **kwargs):
         """
         A single epoch.
-
         :param X: a numpy array of data
         :param map_radius: The radius at the current epoch, given the learning rate and map size
         :param learning_rate: The learning rate.
@@ -32,15 +32,9 @@ class MSom(Som):
         """
 
         # Calc once per epoch
-        self.grid, self.grid_distances = self._distance_grid(map_radius)
+        lr = learning_rate[0]
 
-        learning_rate = learning_rate[0]
-
-        # One radius per epoch
-        map_radius_squared = (2 * map_radius) ** 2
-
-        # One cache per epoch
-        cache = {}
+        context = kwargs['context']
 
         # One accumulator per epoch
         accumulator_x = np.zeros_like(self.weights)
@@ -51,56 +45,37 @@ class MSom(Som):
 
         num_batches = np.ceil(len(X) / batch_size).astype(int)
 
-        all_activations = []
+        influences = self._distance_grid(map_radius) * lr
+        influences = np.asarray([influences] * self.data_dim).transpose((1, 2, 0))
 
         for index in progressbar(range(num_batches), idx_interval=1, mult=batch_size):
 
             # Select the current batch.
             current = X[index * batch_size: (index+1) * batch_size]
+            prev_bmu = np.zeros((batch_size,), dtype=np.int)
 
             # Weight vector of previous activations.
             # ct = (1 - beta) * W_i + beta * cI
             # both are shape of data_dim
-            prev_activations = np.zeros((current.shape[0], self.data_dim))
 
             for idx in range(current.shape[1]):
 
                 # Select a column, which represents the idxth example of a sequence.
                 column = current[:, idx, :]
 
-                # Reset influence.
-                influences = []
-
                 # Get the indices of the Best Matching Units, given the data.
-                bmu_theta, x_activations, y_activations = self._get_bmus(column, y=prev_activations)
+                distance, x_activations, y_activations = self._get_bmus(column, c=context)
 
-                p = np.arange(len(bmu_theta))
-                prev_activations = (1 - self.beta) * x_activations[p, bmu_theta] + self.beta * y_activations[p, bmu_theta]
+                bmu = np.argmin(distance, axis=1)
 
-                for bmu in bmu_theta:
+                context = (1 - self.beta) * self.weights[prev_bmu] + self.beta * self.context_weights[prev_bmu]
 
-                    # There is only one possible influence per BMU, so caching works
-                    # really well, especially for a small number of exemplars.
-                    try:
-                        influence = cache[bmu]
-                    except KeyError:
-
-                        x_, y_ = self._index_dict[bmu]
-                        influence = self._calculate_influence(map_radius_squared, center_x=x_, center_y=y_)
-
-                        # Multiply the influence by the learning rate for speed.
-                        influence = np.tile(influence * learning_rate, (self.data_dim, 1)).T
-                        cache[bmu] = influence
-
-                    influences.append(influence)
-
-                # Influences is same size as minibatches.
-                influences = np.array(influences)
+                influences_local = influences[bmu]
 
                 # Minibatch update of X and Y. Returns arrays of updates,
                 # one for each example.
-                update_x = self._update(x_activations, influences)
-                update_y = self._update(y_activations, influences)
+                update_x = self._calculate_update(x_activations, influences_local)
+                update_y = self._calculate_update(y_activations, influences_local)
 
                 # Take the mean of all updates, and update
                 # the accumulator (not the weights!)
@@ -109,6 +84,8 @@ class MSom(Som):
                 num_updates += 1
                 # all_activations.append((x_activations, y_activations))
 
+                prev_bmu = bmu
+
         # Update the weights and recursive weights only
         # once per epoch with the mean of updates.
         # works because the mean of a mean is the same as the mean of
@@ -116,12 +93,77 @@ class MSom(Som):
         self.weights += (accumulator_x / num_updates)
         self.context_weights += (accumulator_y / num_updates)
 
-        return all_activations
+        return context
+
+    def train(self, X, num_epochs=10, batch_size=100):
+        """
+        Fits the SOM to some data for a number of epochs.
+        As the learning rate is decreased proportionally to the number
+        of epochs, incrementally training a SOM is not feasible.
+
+        :param X: the data on which to train.
+        :param num_epochs: The number of epochs to simulate
+        :return: None
+        """
+
+        # Scaler ensures that the neighborhood radius is 0 at the end of training
+        # given a square map.
+        self.lam = num_epochs / np.log(self.sigma)
+
+        # Local copy of learning rate.
+        learning_rate = self.learning_rates
+
+        bmus = []
+
+        real_start = time.time()
+
+        num_batches = np.ceil(len(X) / batch_size).astype(int)
+        if np.ndim(X) == 2:
+            X = np.resize(X, (num_batches * batch_size, X.shape[1]))
+        elif np.ndim(X) == 3:
+            X = np.resize(X, (num_batches * batch_size, X.shape[1], X.shape[2]))
+
+        print(X.shape)
+
+        context = np.zeros((batch_size, self.data_dim))
+
+        for epoch in range(num_epochs):
+
+            print("\nEPOCH: {0}/{1}".format(epoch+1, num_epochs))
+            start = time.time()
+
+            map_radius = self.nbfunc(self.sigma, epoch, self.lam)
+            context = self.epoch_step(X, map_radius, learning_rate, batch_size=batch_size, context=context)
+
+            learning_rate = self.lrfunc(self.learning_rates, epoch, num_epochs)
+
+            print("\nEPOCH TOOK {0:.2f} SECONDS.".format(time.time() - start))
+            print("TOTAL: {0:.2f} SECONDS.".format(time.time() - real_start))
+
+            if epoch % 10 == 0:
+                self._entropy(context)
+                print(self.entropy)
+                print(self.alpha)
+
+        self.trained = True
+
+        return bmus
+
+    def _entropy(self, context):
+
+        new_entropy = -np.sum(context * np.nan_to_num(np.log2(context)), axis=1).mean(axis=0)
+
+        if new_entropy < self.entropy:
+            self.alpha += 0.01
+        elif new_entropy > self.entropy:
+            self.alpha -= 0.01
+
+        self.alpha = max(0.0, min(1.0, self.alpha))
+        self.entropy = new_entropy
 
     def _get_bmus(self, x, **kwargs):
         """
         Gets the best matching units, based on euclidean distance.
-
         :param x: The input vector
         :return: An integer, representing the index of the best matching unit.
         """
@@ -129,7 +171,7 @@ class MSom(Som):
         # Differences is the components of the weights subtracted from the weight vector.
         differences_x = self._pseudo_distance(x, self.weights)
         # Idem for previous activation.
-        differences_y = self._pseudo_distance(kwargs['y'], self.context_weights)
+        differences_y = self._pseudo_distance(kwargs['c'], self.context_weights)
 
         # Distances are squared euclidean norm of differences.
         # Since euclidean norm is sqrt(sum(square(x)))) we can leave out the sqrt
@@ -141,32 +183,64 @@ class MSom(Som):
         # BMU is based on a weigted subtraction of current and previous activation.
         distances = ((1 - self.alpha) * distances_x) + (self.alpha * distances_y)
 
-        return np.argmin(distances, axis=1), differences_x, differences_y
+        return distances, differences_x, differences_y
 
     def predict(self, X):
         """
         Predicts node identity for input data.
         Similar to a clustering procedure.
-
         :param x: The input data.
         :return: A list of indices
         """
 
         # Start with a clean buffer.
-        prev_activations = np.zeros((len(X), self.map_dim, self.data_dim))
+        context = np.zeros((X.shape[0], self.data_dim))
 
         all_bmus = []
 
         for idx in range(X.shape[1]):
 
             column = X[:, idx, :]
-            bmus, x_activations, y_activations = self._get_bmus(column, y=prev_activations)
-            p = np.arange(len(bmus))
-            prev_activations = (1 - self.beta) * x_activations[p, bmus] + self.beta * y_activations[p, bmus]
+            distance, _, _ = self._get_bmus(column, c=context)
+
+            bmus = np.argmin(distance, axis=1)
+
+            context = self.beta * self.weights[bmus] + (1 - self.beta) * self.context_weights[bmus]
 
             all_bmus.append(bmus)
 
         return np.array(all_bmus).T
+
+    def _map(self, distance):
+
+        return distance.reshape(self.width, self.height)
+
+    def predict_distribution(self, X):
+        """
+        Predicts node identity for input data.
+        Similar to a clustering procedure.
+        :param x: The input data.
+        :return: A list of indices
+        """
+
+        # Start with a clean buffer.
+        context = np.zeros((X.shape[0], self.data_dim))
+
+        all_bmus = []
+
+        for idx in range(X.shape[1]):
+
+            column = X[:, idx, :]
+            distance, _, _ = self._get_bmus(column, c=context)
+
+            bmus = np.argmin(distance, axis=1)
+
+            context = self.beta * self.weights[bmus] + (1 - self.beta) * self.context_weights[bmus]
+
+            all_bmus.append(distance)
+
+        return np.array(all_bmus).T
+
 
 if __name__ == "__main__":
 
@@ -193,12 +267,15 @@ if __name__ == "__main__":
 
     colorpicker = np.arange(len(colors))
 
-    data = np.random.choice(colorpicker, size=(1000, 15))
-    data = colors[data]
+    d1 = colors[np.random.choice(colorpicker, size=15)]
+    d2 = colors[np.random.choice(colorpicker, size=15)]
+    d3 = colors[np.random.choice(colorpicker, size=15)]
+    data = np.array([d1, d2, d3] * 100)
+    print(data.shape)
 
-    s = MSom(30, 30, 3, [1.0], 0.03, 0.5)
+    s = MSom(5, 5, 3, [1.0], 0.0, 0.9)
     start = time.time()
-    bmus = s.train(data, num_epochs=1000, batch_size=100)
+    cProfile.run("s.train(data, num_epochs=1000, batch_size=100)")
 
     # bmu_history = np.array(bmu_history).T
     print("Took {0} seconds".format(time.time() - start))
