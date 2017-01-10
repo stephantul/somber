@@ -3,23 +3,14 @@ import numpy as np
 
 class Orthographizer(object):
 
-    def __init__(self, max_length=10):
+    def __init__(self):
         """
         An orthographic vectorizer which vectorizes according to the 17-segment
         display, commonly found on a microwave or other cheap electronic devices.
-
-        See Wikipedia:
-
-        :param max_length: The maximum length of words in characters
-        :return:
         """
 
         self.binarizer = {"A1": 0, "A2": 1, "F": 2, "H": 3, "I": 4, "J": 5, "B": 6, "G1": 7, "G2": 8,
                           "E": 9, "K": 10, "L": 11, "M": 12, "C": 13, "D1": 14, "D2": 15, "DP": 16}
-
-        super().__init__()
-
-        self.maxlen = max_length
 
         # Features
         self.orth = {"◰": ['A1', 'A2', 'B', 'C', 'D1', 'D2', 'E', 'F', 'G1', 'I'],
@@ -286,40 +277,22 @@ class Orthographizer(object):
 
         return not set(x).difference(self.data.keys())
 
-    def vectorize_single(self, word):
+    def transform(self, sequence, check=True):
         """
         Vectorize a single word.
 
         Raises a ValueError if the word is too long.
 
-        :param word: A string of characters
+        :param sequence: A string of characters
+        :param check: whether to perform checking for illegal characters.
         :return: A numpy array, representing the concatenated letter representations.
         """
 
-        if len(word) > self.maxlen:
-            raise ValueError("Too long")
+        if check and not self.check(sequence):
+            raise ValueError
 
-        x = np.zeros((self.maxlen, len(self.binarizer),))
-        for idx, c in enumerate(word):
+        x = np.zeros((len(sequence), len(self.binarizer),))
+        for idx, c in enumerate(sequence):
             x[idx] += self.data[c]
 
         return x
-
-    def fit_transform(self, data):
-
-        return self.transform(data)
-
-    def transform(self, data):
-        """
-        Vectorize an entire corpus.
-
-        :param data: A list of words.
-        :return: A numpy array
-        """
-
-        X = []
-
-        for word in data:
-            X.append(self.vectorize_single(word))
-
-        return np.array(X)

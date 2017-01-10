@@ -125,3 +125,9 @@ class MultiPlexer(object):
     @property
     def shape(self):
         return self.new_shape
+
+    def mean(self, axis=None):
+
+        if axis is None:
+            return self.array.mean()
+        return self.array.mean(axis=axis)

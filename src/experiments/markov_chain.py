@@ -3,7 +3,9 @@ import numpy as np
 
 class MarkovGenerator(object):
 
-    def __init__(self, representations, transitions, start_probabilities):
+    def __init__(self, representations, transitions, start_probabilities, seed=44):
+
+        np.random.seed(seed)
 
         check = transitions.sum(axis=1)
         if not np.all([check == 1.0]):
@@ -11,7 +13,7 @@ class MarkovGenerator(object):
 
         assert len(representations) == len(transitions)
 
-        self.representations = representations
+        self.representations = np.array(representations)
         self.transitions = transitions
         self.choices = np.arange(len(transitions))
         self.start = start_probabilities
@@ -31,7 +33,7 @@ class MarkovGenerator(object):
                 seq.append(self.representations[chosen])
                 pos = chosen
 
-            output.append(seq)
+            output.append(np.array(seq))
 
         return np.array(output)
 

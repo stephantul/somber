@@ -45,7 +45,7 @@ if __name__ == "__main__":
     o = Orthographizer(15)
 
     X = np.array([p.vectorize_single(phon) for phon in phones])
-    Y = np.array([o.vectorize_single(orth) for orth in words])
+    Y = np.array([o.transform(orth) for orth in words])
 
     X, Y = unison_shuffled_copies(X, Y)
 
@@ -63,7 +63,7 @@ if __name__ == "__main__":
     test_phon = [orth_to_phon[k] for k in test_orth]
 
     X_test = np.array([p.vectorize_single(phon) for phon in test_phon])
-    Y_test = np.array([o.vectorize_single(orth) for orth in test_orth])
+    Y_test = np.array([o.transform(orth) for orth in test_orth])
 
     h = Hebbian(orth_som=r_orth, phon_som=r_phon, learning_rate=1.0, hebbian_offset=0.01)
     h.run_samples(X_train[:1000], Y_train[:1000], num_epochs=100, batch_size=100)

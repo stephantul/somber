@@ -1,18 +1,27 @@
 import numpy as np
-from recsom import RecSom
+import logging
 
+from merging import Merging, MergingGas
+from recursive import Recursive
+from som import Som
 from src.experiments.markov_chain import MarkovGenerator
-from utils import static
+from utils import static, MultiPlexer
 
 if __name__ == "__main__":
 
-    m = MarkovGenerator(np.array([0, 1]), np.array([[0.7, 0.3], [0.4, 0.6]]), np.array([0.5, 0.5]))
-    X = m.generate_sequences(120000, 1)
+    logging.basicConfig(level=logging.INFO)
+
+    # mgen = MarkovGenerator(np.array([[1, 0], [0, 1], [1, 1]]), np.array([[0.3, 0.1, 0.6], [0.2, 0.5, 0.3], [0.1, 0.4, 0.5]]), np.array([0.2, 0.4, 0.4]))
+    mgen = MarkovGenerator(np.array([1, 0]), np.array([[0.4, 0.6], [0.7, 0.3]]), np.array([1.0, 0.0]))
+    X = mgen.generate_sequences(1, 1000000)[0]
+
+    # X = np.random.binomial(1, 0.5, size=(1000000,))
 
     print("Generated data")
     print(X.shape)
 
     # X = np.random.binomial(1, 0.3, size=(1000000,))
 
-    m = RecSom(10, 10, 1, 0.3, sigma=10, alpha=1.25, beta=0.9, nbfunc=static, lrfunc=static)
-    m.train(X, 100)
+    r = Recursive((10, 10), 1, 0.1, alpha=5, beta=0.5, lrfunc=static)
+    # m = Som((10, 10), 2, 0.3)
+    r.train(MultiPlexer(X, 3), 1000)

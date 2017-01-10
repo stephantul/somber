@@ -17,7 +17,7 @@ def create_orth_phon_dictionary(dictionary, orthography, phonology):
     result = {}
     for k, v in dictionary.items():
         try:
-            result[k] = (orthography.vectorize_single(k), phonology.vectorize_single(v))
+            result[k] = (orthography.transform(k), phonology.transform(v))
         except (KeyError, ValueError):
             continue
 

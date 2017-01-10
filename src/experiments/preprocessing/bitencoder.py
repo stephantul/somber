@@ -11,10 +11,10 @@ class BitEncoder(object):
         self.num_bits = None
         self.data = {}
 
-    def fit_transform(self, data, maxlen=10):
+    def fit_transform(self, data):
 
         self.fit(data)
-        return self.transform(data, maxlen)
+        return self.transform(data)
 
     def fit(self, data):
 
@@ -26,28 +26,11 @@ class BitEncoder(object):
             d = [int(v[idx]) if idx < len(v) else 0 for idx in reversed(range(self.num_bits))]
             self.data[k] = d
 
-    def transform(self, data, maxlen):
+    def transform(self, sequence):
 
-        X = []
+        transformed = np.zeros((len(sequence), self.num_bits))
 
-        for seq in [seq for seq in data if len(seq) <= maxlen]:
+        for idx, item in enumerate(sequence):
+            transformed[idx] += self.data[item]
 
-            to_append = np.zeros((maxlen, self.num_bits))
-
-            for idx, item in enumerate(seq):
-                to_append[idx] += self.data[item]
-
-            X.append(to_append)
-
-        return np.array(X)
-
-if __name__ == "__main__":
-
-    p = ["Ik ben een hondje", "ik ben een kathe baha...!!!"]
-    b = BitEncoder()
-    z = b.fit_transform(p)
-
-    print(z)
-    print(b.data)
-    print(b.index)
-    print(b.num_bits)
+        return transformed

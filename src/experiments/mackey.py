@@ -6,7 +6,7 @@ from collections import deque
 def mackey_glass(sample_len=1000, tau=17, seed=None, n_samples=1):
     """
     mackey_glass(sample_len=1000, tau=17, seed = None, n_samples = 1) -> input
-    Generate the Mackey Glass time-series. Parameters are:
+    Generate the Mackey Glass time-series.
     :param sample_len: length of the time-series in timesteps. Default is 1000.
     :param tau: delay of the MG - system. Commonly used values are tau=17 (mild
           chaos) and tau=30 (moderate chaos). Default is 17.

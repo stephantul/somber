@@ -48,9 +48,9 @@ def create_data():
 if __name__ == "__main__":
 
     X = create_square_data()
-    d = MultiPlexer(X, 100)
+    d = MultiPlexer(X, 1000)
 
-    s = Som(30, 30, 2, 1.0)
+    s = Som((30, 30), 2, 1.0)
 
     s.train(d, 100)
     error = s.quant_error(X)
