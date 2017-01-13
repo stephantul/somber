@@ -2,7 +2,6 @@ import logging
 import time
 import numpy as np
 
-from collections import defaultdict
 from utils import progressbar, expo, linear, static
 from functools import reduce
 
@@ -12,11 +11,7 @@ logger = logging.getLogger(__name__)
 
 class Som(object):
     """
-    Base is the base class from which both Soms and Neural gases are derived.
-    It contains various functions which are agnostic to the inner workings of the
-    specific models.
-
-    This class can not be used on its own.
+    Basic SOM
     """
 
     def __init__(self,
