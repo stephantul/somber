@@ -2,8 +2,8 @@ import numpy as np
 import logging
 import time
 
-from som import Som
-from utils import expo, progressbar
+from somber.som import Som
+from somber.utils import expo, progressbar
 
 
 logger = logging.getLogger(__name__)
@@ -18,7 +18,7 @@ class Recursive(Som):
         self.alpha = alpha
         self.beta = beta
 
-    def _train_loop(self, X, update_counter):
+    def _train_loop(self, X, update_counter, context_mask):
         """
         The train loop. Is a separate function to accomodate easy inheritance.
 
@@ -40,6 +40,10 @@ class Recursive(Som):
 
                 epoch += 1
                 influences = self._param_update(epoch, len(update_counter))
+
+            if idx in context_mask:
+
+                prev_activation = np.zeros((self.map_dim,))
 
     def _example(self, x, influences, **kwargs):
         """

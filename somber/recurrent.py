@@ -2,8 +2,8 @@ import numpy as np
 import logging
 import time
 
-from som import Som
-from utils import expo, progressbar
+from somber.som import Som
+from somber.utils import expo, progressbar
 
 
 logger = logging.getLogger(__name__)
@@ -16,12 +16,13 @@ class Recurrent(Som):
         super().__init__(map_dim, dim, learning_rate, lrfunc, nbfunc, sigma)
         self.alpha = alpha
 
-    def _train_loop(self, X, update_counter):
+    def _train_loop(self, X, update_counter, context_mask):
         """
         The train loop. Is a separate function to accomodate easy inheritance.
 
         :param X: The input data.
         :param update_counter: A list of indices at which the params need to be updated.
+        :param context_mask: A list of zeroes and ones.
         :return: None
         """
 
@@ -37,6 +38,10 @@ class Recurrent(Som):
 
                 epoch += 1
                 influences, learning_rate = self._param_update(epoch, len(update_counter))
+
+            if idx in context_mask:
+
+                prev_activation = np.zeros((self.map_dim, self.data_dim))
 
     def _example(self, x, influences, **kwargs):
         """

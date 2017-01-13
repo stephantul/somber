@@ -146,7 +146,8 @@ def progressbar(target, width=30, interval=0.01, idx_interval=10, use=True, mult
 
 class MultiPlexer(object):
     """
-    Multiplies a given np array n times.
+    Multiplies a given array n times.
+    This is useful in simulating epochs.
 
     """
 
@@ -182,3 +183,23 @@ class MultiPlexer(object):
         if axis is None:
             return self.array.mean()
         return self.array.mean(axis=axis)
+
+
+def reset_context_symbol(X, symbols):
+    """
+    This function can be used to create a kind of context mask.
+    In all SOM models in this package, all sequences are assumed to be
+    conditionally dependent on all preceding items. This is usually
+    not the case. Therefore, it can be useful to automatically set the
+    context to 0 at certain points.
+
+    Given some input, this function generates a 1 if the symbol is not
+    in symbols, and a 0 if it is.
+
+    :param X: The input sequence
+    :param symbols: A list of symbols which cause the context to be reset to 0
+    :return: A list, the size of X, with 1 in places in which the context should
+    continue, and 0 in places it should be reset.
+    """
+
+    return [idx for idx, x in enumerate(X) if x in symbols]

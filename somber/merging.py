@@ -2,8 +2,8 @@ import numpy as np
 import time
 import logging
 
-from som import Som
-from utils import expo, progressbar
+from somber.som import Som
+from somber.utils import expo, progressbar
 
 
 logger = logging.getLogger(__name__)
@@ -20,12 +20,12 @@ class Merging(Som):
         self.context_weights = np.ones(self.weights.shape)
         self.entropy = 0
 
-    def _train_loop(self, X, update_counter):
+    def _train_loop(self, X, update_counter, context_mask):
 
         self.context_weights *= X.mean(axis=0)
 
         epoch = 0
-        bmu = 0
+        bmu = None
         influences = self._param_update(0, len(update_counter))
 
         bmu_entropy = np.zeros((self.map_dim,))
@@ -45,6 +45,10 @@ class Merging(Som):
                 epoch += 1
                 influences = self._param_update(epoch, len(update_counter))
 
+            if idx in context_mask:
+
+                bmu = None
+
     def _example(self, x, influences, **kwargs):
         """
         A single epoch.
@@ -58,7 +62,10 @@ class Merging(Som):
         # context = kwargs['context']
         prev_bmu = kwargs['prev_bmu']
 
-        context = (1 - self.beta) * self.weights[prev_bmu] + self.beta * self.context_weights[prev_bmu]
+        if prev_bmu is None:
+            context = np.zeros((self.data_dim,))
+        else:
+            context = (1 - self.beta) * self.weights[prev_bmu] + self.beta * self.context_weights[prev_bmu]
 
         # Get the indices of the Best Matching Units, given the data.
         activation, diff_x, diff_context = self._get_bmus(x, context=context)

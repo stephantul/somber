@@ -2,7 +2,7 @@ import logging
 import time
 import numpy as np
 
-from utils import progressbar, expo, linear, static
+from somber.utils import progressbar, expo, linear, static
 from functools import reduce
 
 
@@ -11,7 +11,7 @@ logger = logging.getLogger(__name__)
 
 class Som(object):
     """
-    Basic SOM
+    This is the basic SOM class.
     """
 
     def __init__(self,
@@ -51,8 +51,8 @@ class Som(object):
         self.map_dim = reduce(np.multiply, map_dim, 1)
 
         # Weights are initialized to small random values.
-        # Initializing to more appropriate values, given the dataset
-        # will probably give better results
+        # Initializing to more appropriate values given the dataset
+        # will probably give faster convergence.
         self.weights = np.random.uniform(-0.1, 0.1, size=(self.map_dim, dim))
         self.data_dim = dim
 
@@ -66,7 +66,7 @@ class Som(object):
 
         self.trained = False
 
-    def train(self, X, total_updates=10, stop_updates=1.0):
+    def train(self, X, total_updates=10, stop_updates=1.0, context_mask=()):
         """
         Fits the SOM to some data.
         The updates correspond to the number of updates to the parameters
@@ -80,6 +80,9 @@ class Som(object):
         the neighborhood and learning rate should decrease. If the total number of updates, for example
         is 1000, and stop_updates = 0.5, 1000 updates will have occurred after half of the examples.
         After this period, no updates of the parameters will occur.
+        :param context_mask: a binary mask used to indicate whether the context should be set to 0
+        at that specified point in time. Used to make items conditionally independent on previous items.
+        Examples: Spaces in character-based models of language. Periods and question marks in models of sentences.
         :return: None
         """
 
@@ -91,21 +94,22 @@ class Som(object):
         start = time.time()
 
         # Train
-        self._train_loop(X, update_counter)
+        self._train_loop(X, update_counter, context_mask=context_mask)
         self.trained = True
 
         logger.info("Total train time: {0}".format(time.time() - start))
 
-    def _train_loop(self, X, update_counter):
+    def _train_loop(self, X, update_counter, context_mask):
         """
         The train loop. Is a separate function to accomodate easy inheritance.
 
         :param X: The input data.
         :param update_counter: A list of indices at which the params need to be updated.
+        :param context_mask: Not used in the standard SOM.
         :return: None
         """
 
-        epoch = 0
+        step = 0
 
         # Calculate the influences for update 0.
         influences = self._param_update(0, len(update_counter))
@@ -115,9 +119,9 @@ class Som(object):
             self._example(x, influences)
 
             if idx in update_counter:
-                epoch += 1
+                step += 1
 
-                influences = self._param_update(epoch, len(update_counter))
+                influences = self._param_update(step, len(update_counter))
 
     def _example(self, x, influences, **kwargs):
         """
