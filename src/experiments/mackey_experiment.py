@@ -5,6 +5,7 @@ import logging
 from merging import Merging
 from recurrent import Recurrent
 from recursive import Recursive
+from merging import Merging
 from som import Som
 from utils import MultiPlexer
 
@@ -23,7 +24,7 @@ if __name__ == "__main__":
     s.train(g_plex, total_epochs=1000, rough_epochs=0.5)
     err_1 = s.quant_error(glass)
 
-    m = Recursive((10, 10), 1, 0.03, alpha=1.0, beta=0.02)
+    m = Merging((10, 10), 1, 0.5, alpha=0.001, beta=0.5)
     m.train(g_plex, total_epochs=1000, rough_epochs=0.5)
     err_2 = m.quant_error(glass)
 

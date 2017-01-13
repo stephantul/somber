@@ -21,7 +21,7 @@ class Recursive(Som):
     def _train_loop(self, X, update_counter):
 
         epoch = 0
-        influences, learning_rates = self._param_update(0, len(update_counter))
+        influences = self._param_update(0, len(update_counter))
 
         prev_activation = np.zeros((self.map_dim,))
 
@@ -32,7 +32,7 @@ class Recursive(Som):
             if idx in update_counter:
 
                 epoch += 1
-                influences, learning_rate = self._param_update(epoch, len(update_counter))
+                influences = self._param_update(epoch, len(update_counter))
 
     def _example(self, x, influences, **kwargs):
         """

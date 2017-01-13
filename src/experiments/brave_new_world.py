@@ -3,6 +3,7 @@ import numpy as np
 import logging
 
 from recursive import Recursive
+from merging import Merging
 from som import Som
 from experiments.preprocessing.ortho import Orthographizer
 from string import ascii_lowercase
@@ -38,9 +39,11 @@ if __name__ == "__main__":
 
     X_test = o.transform(test)
 
-    r = Recursive((20, 20), X.shape[1], learning_rate=0.1, alpha=3, beta=0.7)
-    r.train(MultiPlexer(X, 2), total_epochs=1000, rough_epochs=0.5)
+    # r = Recursive((20, 20), X.shape[1], learning_rate=0.1, alpha=3, beta=0.7)
+    # r.train(MultiPlexer(X, 2), total_epochs=1000, rough_epochs=0.5)
+    m = Merging((20, 20), X.shape[1], learning_rate=0.1, alpha=0.001, beta=0.5)
+    m.train(MultiPlexer(X, 2), total_epochs=1000, rough_epochs=0.5)
 
     X_letters = o.transform(ascii_lowercase)
-    print(r.predict(X_letters))
-    print(r.predict(X_test))
+    print(m.predict(X_letters))
+    print(m.predict(X_test))
