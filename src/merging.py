@@ -8,8 +8,6 @@ from utils import expo, progressbar
 
 logger = logging.getLogger(__name__)
 
-ng = True
-
 
 class Merging(Som):
 

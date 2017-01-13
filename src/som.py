@@ -47,42 +47,52 @@ class Som(object):
             self.sigma = (max(map_dim) / 2.0) + 0.01
 
         self.learning_rate = learning_rate
+        # A tuple of dimensions
+        # Usually (width, height), but can accomodate one-dimensional maps.
         self.map_dimensions = map_dim
+
+        # The dimensionality of the weight vector
+        # Usually (width * height)
         self.map_dim = reduce(np.multiply, map_dim, 1)
+
+        # Weights are initialized to small random values.
+        # Initializing to more appropriate values, given the dataset
+        # will probably give better results
         self.weights = np.random.uniform(-0.1, 0.1, size=(self.map_dim, dim))
         self.data_dim = dim
 
+        # The function used to diminish the learning rate.
         self.lrfunc = lrfunc
+        # The function used to diminish the neighborhood size.
         self.nbfunc = nbfunc
 
+        # Initialize the distance grid: only needs to be done once.
         self.distance_grid = self._init_distance_grid()
 
         self.trained = False
 
-    def train(self, X, total_epochs=10, rough_epochs=1.0):
+    def train(self, X, total_updates=10, stop_updates=1.0):
         """
-        Fits the SOM to some data for a number of epochs.
-        As the learning rate is decreased proportionally to the number
-        of epochs, incrementally training a SOM is not feasible.
+        Fits the SOM to some data.
+        The updates correspond to the number of updates to the parameters
+        (i.e. learning rate, neighborhood, not weights!) to perform during training.
+
+        In general, 1000 updates will do for most learning problems.
 
         :param X: the data on which to train.
-        :param total_epochs: The number of epochs to simulate.
-        :param rough_epochs: A fraction, describing over how many of the epochs
-        the neighborhood should decrease. If the total number of epochs, for example
-        is 1000, and rough_epochs = 0.5, the neighborhood size will be minimal after
-        500 epochs.
+        :param total_updates: The number of updates to the parameters to do during training.
+        :param stop_updates: A fraction, describing over which portion of the training data
+        the neighborhood and learning rate should decrease. If the total number of updates, for example
+        is 1000, and stop_updates = 0.5, 1000 updates will have occurred after half of the examples.
+        After this period, no updates of the parameters will occur.
         :return: None
         """
 
-        # Calculate the number of updates required
-        num_updates = total_epochs * rough_epochs
-
         # The step size is the number of items between rough epochs.
-        step_size = (X.shape[0] * rough_epochs) // num_updates
+        step_size = (X.shape[0] * stop_updates) // total_updates
 
         # Precalculate the number of updates.
-        update_counter = np.arange(step_size, (X.shape[0] * rough_epochs) + step_size, step_size)
-
+        update_counter = np.arange(step_size, (X.shape[0] * stop_updates) + step_size, step_size)
         start = time.time()
 
         # Train
@@ -102,6 +112,7 @@ class Som(object):
 
         epoch = 0
 
+        # Calculate the influences for update 0.
         influences = self._param_update(0, len(update_counter))
 
         for idx, x in enumerate(progressbar(X)):
@@ -129,10 +140,18 @@ class Som(object):
 
         return bmu
 
-    def _param_update(self, epoch, num_epochs):
+    def _param_update(self, iteration, num_iterations):
+        """
+        Updates the parameters of the model. Encapsulated into a function for
+        easy inheritance.
 
-        learning_rate = self.lrfunc(self.learning_rate, epoch, num_epochs)
-        map_radius = self.nbfunc(self.sigma, epoch, num_epochs)
+        :param iteration: The current iteration
+        :param num_iterations: The total number of iterations.
+        :return: The influences for the current epoch.
+        """
+
+        learning_rate = self.lrfunc(self.learning_rate, iteration, num_iterations)
+        map_radius = self.nbfunc(self.sigma, iteration, num_iterations)
 
         influences = self._calc_influence(map_radius) * learning_rate
 
@@ -237,26 +256,7 @@ class Som(object):
         :return: The receptive field of each neuron.
         """
 
-        p = self.predict(X)
-
-        prev = None
-        fields = defaultdict(list)
-        currfield = []
-
-        for idx, ip in enumerate(zip(X, p)):
-
-            item, prediction = ip
-
-            if prediction == prev:
-                currfield.append(X[idx-1])
-            else:
-                if currfield:
-                    currfield.append(X[idx-1])
-                    fields[p[idx-1]].append(currfield)
-                currfield = []
-            prev = prediction
-
-        return {k: [z for z in v] for k, v in fields.items()}
+        raise NotImplementedError("Currently not implemented")
 
     def invert_projection(self, X, identities):
         """
@@ -285,16 +285,29 @@ class Som(object):
         return np.array(node_match).reshape(self.map_dimensions)
 
     def _apply_influences(self, distances, influences):
+        """
+        First calculates the BMU.
+        Then gets the appropriate influence from the neighborhood, given the BMU
+
+        :param distances: A Numpy array of distances.
+        :param influences: A (map_dim, map_dim, data_dim) array describing the influence
+        each node has on each other node.
+        :return: The influence given the bmu, and the index of the bmu itself.
+        """
 
         bmu = np.argmin(distances)
         return influences[bmu], bmu
 
     def _calc_influence(self, sigma):
         """
+        Pre-calculates the influence for a given value of sigma.
 
+        The neighborhood has size map_dim * map_dim, so for a 30 * 30 map, the neighborhood will be
+        size (900, 900). It is then duplicated _data_dim times, and reshaped into an
+        (map_dim, map_dim, data_dim) array. This is done to facilitate fast calculation in subsequent steps.
 
-        :param sigma:
-        :return:
+        :param sigma: The neighborhood value.
+        :return: The neighborhood, reshaped into an array
         """
 
         neighborhood = np.exp(-1.0 * self.distance_grid / (2.0 * sigma ** 2)).reshape(self.map_dim, self.map_dim)
@@ -302,7 +315,7 @@ class Som(object):
 
     def _init_distance_grid(self):
         """
-
+        Initializes the distance grid by calls to _grid_dist.
 
         :return:
         """
@@ -317,10 +330,11 @@ class Som(object):
 
     def _grid_dist(self, index):
         """
+        Calculates the distance grid for a single index position. This is pre-calculated for
+        fast neighborhood calculations later on (see _calc_influence).
 
-
-        :param index:
-        :return:
+        :param index: The index for which to calculate the distances.
+        :return: A flattened version of the distance array.
         """
 
         width, height = self.map_dimensions
