@@ -2,8 +2,9 @@ import numpy as np
 import logging
 
 # from matplotlib import pyplot as plt
-from merging import Merging, MergingGas
+from merging import Merging
 from recurrent import Recurrent
+from recursive import Recursive
 from som import Som
 from utils import MultiPlexer
 
@@ -18,20 +19,20 @@ if __name__ == "__main__":
 
     g_plex = MultiPlexer(glass, 100)
 
-    # s = Som((10, 10), 1, 1.0)
-    # s.train(g_plex, num_effective_epochs=100)
-    # err_1 = s.quant_error(glass)
+    s = Som((10, 10), 1, 0.03)
+    s.train(g_plex, total_epochs=1000, rough_epochs=0.5)
+    err_1 = s.quant_error(glass)
 
-    m = Merging((10, 10), 1, 0.03, alpha=0.001, beta=0.75)
-    m.train(g_plex, num_effective_epochs=1000, use_entropy=True)
+    m = Recursive((10, 10), 1, 0.03, alpha=1.0, beta=0.02)
+    m.train(g_plex, total_epochs=1000, rough_epochs=0.5)
     err_2 = m.quant_error(glass)
 
-    '''plt.plot(np.arange(len(glass[0][:1000])), glass[0][:1000])
+    '''plt.plot(np.arange(len(glass[:1000])), glass[:1000])
 
-    p_2 = s.predict(glass[0][:1000])
-    plt.plot(np.arange(len(glass[0][:1000])), s.weights[p_2], color='red')
+    p_2 = s.predict(glass[:1000])
+    plt.plot(np.arange(len(glass[:1000])), s.weights[p_2], color='red')
 
-    p = m.predict(glass[0][:1000])
-    plt.plot(np.arange(len(glass[0][:1000])), m.weights[p], color='green')
+    p = m.predict(glass[:1000])
+    plt.plot(np.arange(len(glass[:1000])), m.weights[p], color='green')
 
     plt.show()'''

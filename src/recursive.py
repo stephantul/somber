@@ -18,34 +18,21 @@ class Recursive(Som):
         self.alpha = alpha
         self.beta = beta
 
-    def train(self, X, num_effective_epochs=10):
+    def _train_loop(self, X, update_counter):
 
-        # Scaler ensures that the neighborhood radius is 0 at the end of training
-        # given a square map.
-        self.lam = num_effective_epochs / np.log(self.sigma)
-
-        # Local copy of learning rate.
-        influences, learning_rate = self._param_update(0, num_effective_epochs)
-
-        epoch_counter = X.shape[0] / num_effective_epochs
         epoch = 0
-        start = time.time()
+        influences, learning_rates = self._param_update(0, len(update_counter))
 
-        prev_activation = np.zeros((self.map_dim, self.data_dim))
+        prev_activation = np.zeros((self.map_dim,))
 
         for idx, x in enumerate(progressbar(X)):
 
             prev_activation = self._example(x, influences, prev_activation=prev_activation)
 
-            if idx % epoch_counter == 0:
+            if idx in update_counter:
 
                 epoch += 1
-                influences, learning_rate = self._param_update(epoch, num_effective_epochs)
-
-        self.trained = True
-        logger.info("Number of training items: {0}".format(X.shape[0]))
-        logger.info("Number of items per epoch: {0}".format(epoch_counter))
-        logger.info("Total train time: {0}".format(time.time() - start))
+                influences, learning_rate = self._param_update(epoch, len(update_counter))
 
     def _example(self, x, influences, **kwargs):
         """
@@ -65,14 +52,9 @@ class Recursive(Som):
         # Minibatch update of X and Y. Returns arrays of updates,
         # one for each example.
         self.weights += self._calculate_update(diff_x, influence)
-        self.context_weights += self._calculate_update(diff_context, influence)
+        self.context_weights += self._calculate_update(diff_context, influence[:, 0, np.newaxis])
 
         return activation
-
-    def _apply_influences(self, distances, influences):
-
-        bmu = np.argmax(distances)
-        return influences[bmu], bmu
 
     def _get_bmus(self, x, **kwargs):
         """
@@ -84,8 +66,8 @@ class Recursive(Som):
         prev_activation = kwargs['prev_activation']
 
         # Differences is the components of the weights subtracted from the weight vector.
-        difference_x = self._pseudo_distance(x, self.weights)
-        difference_y = self._pseudo_distance(prev_activation, self.context_weights)
+        difference_x = self._distance_difference(x, self.weights)
+        difference_y = self._distance_difference(prev_activation, self.context_weights)
 
         # Distances are squared euclidean norm of differences.
         # Since euclidean norm is sqrt(sum(square(x)))) we can leave out the sqrt
@@ -94,7 +76,9 @@ class Recursive(Som):
         distance_x = np.sum(np.square(difference_x), axis=1)
         distance_y = np.sum(np.square(difference_y), axis=1)
 
-        activation = np.exp(-(self.alpha * distance_x) - self.beta * distance_y)
+        # Invert activation so argmin can be used in downstream functions
+        # more consistency.
+        activation = 1 - np.exp(-(self.alpha * distance_x + self.beta * distance_y))
 
         return activation, difference_x, difference_y
 
@@ -110,12 +94,10 @@ class Recursive(Som):
         # Return the indices of the BMU which matches the input data most
         distances = []
 
-        prev_activation = np.zeros((self.map_dim, self.data_dim))
+        prev_activation = np.zeros((self.map_dim,))
 
         for x in X:
             prev_activation, _, _ = self._get_bmus(x, prev_activation=prev_activation)
             distances.append(prev_activation)
 
         return distances
-
-

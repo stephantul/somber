@@ -3,7 +3,7 @@ import time
 import numpy as np
 
 from collections import defaultdict
-from utils import progressbar, expo
+from utils import progressbar, expo, linear, static
 from functools import reduce
 
 
@@ -11,6 +11,13 @@ logger = logging.getLogger(__name__)
 
 
 class Base(object):
+    """
+    Base is the base class from which both Soms and Neural gases are derived.
+    It contains various functions which are agnostic to the inner workings of the
+    specific models.
+
+    This class can not be used on its own.
+    """
 
     def __init__(self,
                  map_dim,
@@ -22,6 +29,23 @@ class Base(object):
                  calculate_influence=None,
                  apply_influences=None,
                  sigma=None):
+        """
+
+        :param map_dim: A tuple of map dimensions, e.g. (10, 10) instantiates a 10 by 10 map.
+        :param dim: The data dimensionality.
+        :param learning_rate: The learning rate, which is decreases according to some function
+        :param lrfunc: The function to use in decreasing the learning rate. The functions are
+        defined in utils. Default is exponential.
+        :param nbfunc: The function to use in decreasing the neighborhood size. The functions
+        are defined in utils. Default is exponential.
+        :param calculate_distance_grid: The function to use in calculating the distance grid.
+        This function should not be filled in by hand, and depends on the model (i.e. SOM versus NG)
+        :param calculate_influence: Similar to above
+        :param apply_influences: Similar to above
+        :param sigma: The starting value for the neighborhood size, which is decreased over time.
+        If sigma is None (default), sigma is calculated as ((max(map_dim) / 2) + 0.01), which is
+        generally a good value.
+        """
 
         if sigma is not None:
             self.sigma = sigma
@@ -47,41 +71,58 @@ class Base(object):
 
         self.trained = False
 
-    def train(self, X, num_effective_epochs=10):
+    def train(self, X, total_epochs=10, rough_epochs=1.0):
         """
         Fits the SOM to some data for a number of epochs.
         As the learning rate is decreased proportionally to the number
         of epochs, incrementally training a SOM is not feasible.
 
         :param X: the data on which to train.
-        :param num_effective_epochs: The number of epochs to simulate
+        :param total_epochs: The number of epochs to simulate.
+        :param rough_epochs: A fraction, describing over how many of the epochs
+        the neighborhood should decrease. If the total number of epochs, for example
+        is 1000, and rough_epochs = 0.5, the neighborhood size will be minimal after
+        500 epochs.
         :return: None
         """
 
-        # Scaler ensures that the neighborhood radius is 0 at the end of training
-        # given a square map.
-        self.lam = num_effective_epochs / np.log(self.sigma)
+        # Calculate the number of updates required
+        num_updates = total_epochs * rough_epochs
 
-        influences, learning_rates = self._param_update(0, num_effective_epochs)
+        # Decide on a value for lambda, depending on the function.
+        if self.nbfunc != linear:
+            self.lam = num_updates / np.log(self.sigma)
+        else:
+            self.lam = num_updates
 
-        epoch_counter = X.shape[0] // num_effective_epochs
-        epoch = 0
+        # The step size is the number of items between rough epochs.
+        step_size = (X.shape[0] * rough_epochs) // num_updates
+
+        # Precalculate the number of updates.
+        update_counter = np.arange(step_size, (X.shape[0] * rough_epochs) + step_size, step_size)
+
         start = time.time()
+
+        # Train
+        self._train_loop(X, update_counter)
+        self.trained = True
+
+        logger.info("Total train time: {0}".format(time.time() - start))
+
+    def _train_loop(self, X, update_counter):
+
+        epoch = 0
+
+        influences = self._param_update(0, len(update_counter))
 
         for idx, x in enumerate(progressbar(X)):
 
             self._example(x, influences)
 
-            if idx % epoch_counter == 0:
-
+            if idx in update_counter:
                 epoch += 1
 
-                influences, learning_rates = self._param_update(epoch, num_effective_epochs)
-
-        self.trained = True
-        logger.info("Number of training items: {0}".format(X.shape[0]))
-        logger.info("Number of items per epoch: {0}".format(epoch_counter))
-        logger.info("Total train time: {0}".format(time.time() - start))
+                influences = self._param_update(epoch, len(update_counter))
 
     def _example(self, x, influences, **kwargs):
         """
@@ -112,7 +153,7 @@ class Base(object):
 
         logging.info("RADIUS: {0}".format(map_radius))
 
-        return influences, learning_rate
+        return influences
 
     def _calc_influence(self, sigma):
         """
@@ -124,36 +165,46 @@ class Base(object):
 
         raise NotImplementedError
 
-    def _calculate_update(self, input_vector, influence):
+    def _calculate_update(self, difference_vector, influence):
         """
         Updates the nodes, conditioned on the input vector,
         the influence, as calculated above, and the learning rate.
 
-        :param input_vector: The input vector.
+        Uses Oja's Rule: delta_W = alpha * (X - w)
+
+        In this case (X - w) has been precomputed for speed, in the function
+        _get_bmus.
+
+        :param difference_vector: The difference between the input and some weights.
         :param influence: The influence the result has on each unit, depending on distance.
+        Already includes the learning rate.
         """
 
-        return input_vector * influence
+        return difference_vector * influence
 
     def _get_bmus(self, x):
         """
         Gets the best matching units, based on euclidean distance.
 
         :param x: The input vector
-        :return: An integer, representing the index of the best matching unit.
+        :return: The activations, which is a vector of map_dim, and
+         the distances between the input and the weights, which can be
+         reused in the update calculation.
         """
 
-        differences = self._pseudo_distance(x, self.weights)
-        distances = np.sqrt(np.sum(np.square(differences), axis=1))
-        return distances, differences
+        differences = self._distance_difference(x, self.weights)
 
-    def _pseudo_distance(self, x, weights):
+        # squared euclidean distance.
+        activations = np.sqrt(np.sum(np.square(differences), axis=1))
+        return activations, differences
+
+    def _distance_difference(self, x, weights):
         """
-        Calculates the euclidean distance between an input and all the weights in range.
+        Calculates the difference between an input and all the weights.
 
         :param x: The input.
         :param weights: An array of weights.
-        :return: The distance from the input of each weight.
+        :return: A vector of differences.
         """
         return x - weights
 
@@ -168,14 +219,13 @@ class Base(object):
 
     def _predict_base(self, X):
         """
-        Predicts node identity for input data.
-        Similar to a clustering procedure.
+        Predicts distances to some input data.
 
-        :param x: The input data.
-        :return: A list of indices
+        :param X: The input data.
+        :return: An array of arrays, representing the activation
+        each node has to each input.
         """
 
-        # Return the indices of the BMU which matches the input data most
         distances = []
 
         for x in X:
@@ -186,19 +236,40 @@ class Base(object):
 
     def quant_error(self, X):
         """
-        :param X:
-        :return:
+        Calculates the quantization error by taking the minimum euclidean
+        distance between the units and some input.
+
+        :param X: Input data.
+        :return: A vector of numbers, representing the quantization error
+        for each data point.
         """
 
         dist = self._predict_base(X)
         return np.min(dist, axis=1)
 
     def predict(self, X):
+        """
+        Predict the BMU for each input data.
+
+        :param X: Input data.
+        :return: The index of the bmu which best describes the input data.
+        """
 
         dist = self._predict_base(X)
         return np.argmin(dist, axis=1)
 
     def receptive_field(self, X):
+        """
+        Calculate the receptive field of the SOM on some data.
+
+        The receptive field is the common ending of all sequences which
+        lead to the activation of a given BMU. If a SOM is well-tuned to
+        specific sequences, it will have longer receptive fields, and therefore
+        gives a better description of the dynamics of a given system.
+
+        :param X: Input data.
+        :return: The receptive field of each neuron.
+        """
 
         p = self.predict(X)
 
@@ -222,6 +293,18 @@ class Base(object):
         return {k: [z for z in v] for k, v in fields.items()}
 
     def invert_projection(self, X, identities):
+        """
+        Calculate the inverted projection of a SOM by associating each
+        unit with the input datum that gives the closest match.
+
+        Works best for symbolic (instead of continuous) input data.
+
+        :param X: Input data
+        :param identities: The identities for each input datum, must be same length as X
+        :return: A numpy array with identities, the shape of the map.
+        """
+
+        assert len(X) == len(identities)
 
         # Remove all duplicates from X
         X_unique, names = zip(*set([tuple((tuple(s), n)) for s, n in zip(X, identities)]))
@@ -229,8 +312,8 @@ class Base(object):
 
         for node in self.weights:
 
-            differences = self._pseudo_distance(node, X_unique)
+            differences = self._distance_difference(node, X_unique)
             distances = np.sqrt(np.sum(np.square(differences), axis=1))
             node_match.append(names[np.argmin(distances)])
 
-        return node_match
+        return np.array(node_match).reshape(self.map_dimensions)

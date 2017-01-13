@@ -13,6 +13,11 @@ def static(value, current_epoch, total_epochs):
     return value
 
 
+def linear(value, current_epoch, total_epochs):
+
+    return (value * (total_epochs - current_epoch) / total_epochs) + 0.5
+
+
 def progressbar(target, width=30, interval=0.01, idx_interval=10, use=True, mult=1):
 
     start = time.time()

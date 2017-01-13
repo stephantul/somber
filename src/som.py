@@ -2,7 +2,7 @@ import logging
 import time
 import numpy as np
 
-from utils import MultiPlexer, expo
+from utils import MultiPlexer, expo, linear
 from base import Base
 
 
@@ -114,7 +114,7 @@ if __name__ == "__main__":
 
     colors_ = np.array(colors, dtype=float)'''
 
-    colors = MultiPlexer(colors_, 100)
+    colors = MultiPlexer(colors_, 1000)
 
     # colors = np.vstack([colors, colors, colors, colors, colors, colors, colors, colors])
 
@@ -134,9 +134,9 @@ if __name__ == "__main__":
          'cyan', 'violet', 'yellow', 'white',
          'darkgrey', 'mediumgrey', 'lightgrey']
 
-    s = Som((20, 20), 3, 0.3, sigma=10)
+    s = Som((20, 20), 3, 0.3, sigma=10, nbfunc=linear)
     start = time.time()
-    bmus = s.train(colors, num_effective_epochs=100)
+    bmus = s.train(colors, total_epochs=100, rough_epochs=0.5)
 
     # bmu_history = np.array(bmu_history).T
     print("Took {0} seconds".format(time.time() - start))

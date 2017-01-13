@@ -86,7 +86,7 @@ if __name__ == "__main__":
 
     n = Ng((400,), 3, 0.3, sigma=0.0001)
     start = time.time()
-    bmus = n.train(colors, num_effective_epochs=100)
+    bmus = n.train(colors, total_epochs=100)
 
     # bmu_history = np.array(bmu_history).T
     print("Took {0} seconds".format(time.time() - start))

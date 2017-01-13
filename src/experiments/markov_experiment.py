@@ -22,7 +22,7 @@ if __name__ == "__main__":
     w = np.random.uniform(0.0, 1.0, size=(4, 2))
 
     m = Merging(10, 10, 2, 0.3, 0.0, 0.5)
-    m.train(MultiPlexer(p, 1), num_effective_epochs=1000)
+    m.train(MultiPlexer(p, 1), total_epochs=1000)
 
     s = Som(10, 10, 2, 0.1)
-    s.train(p, num_effective_epochs=100)
+    s.train(p, total_epochs=100)

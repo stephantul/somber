@@ -16,36 +16,20 @@ class Recurrent(Som):
         super().__init__(map_dim, dim, learning_rate, lrfunc, nbfunc, sigma)
         self.alpha = alpha
 
-    def train(self, X, num_effective_epochs=10):
+    def _train_loop(self, X, update_counter):
 
-        # Scaler ensures that the neighborhood radius is 0 at the end of training
-        # given a square map.
-        self.lam = num_effective_epochs / np.log(self.sigma)
-
-        # Local copy of learning rate.
-        influences, learning_rate = self._param_update(0, num_effective_epochs)
-
-        epoch_counter = X.shape[0] / num_effective_epochs
         epoch = 0
-
-        start = time.time()
-
         prev_activation = np.zeros((self.map_dim, self.data_dim))
+        influences, learning_rates = self._param_update(0, len(update_counter))
 
         for idx, x in enumerate(progressbar(X)):
 
             prev_activation = self._example(x, influences, prev_activation=prev_activation)
 
-            if idx % epoch_counter == 0:
+            if idx in update_counter:
 
                 epoch += 1
-
-                influences, learning_rate = self._param_update(epoch, num_effective_epochs)
-
-        self.trained = True
-        logger.info("Number of training items: {0}".format(X.shape[0]))
-        logger.info("Number of items per epoch: {0}".format(epoch_counter))
-        logger.info("Total train time: {0}".format(time.time() - start))
+                influences, learning_rate = self._param_update(epoch, len(update_counter))
 
     def _example(self, x, influences, **kwargs):
         """
@@ -78,7 +62,7 @@ class Recurrent(Som):
         """
 
         # Differences is the components of the weights subtracted from the weight vector.
-        difference_x = self._pseudo_distance(x, self.weights)
+        difference_x = self._distance_difference(x, self.weights)
         activation = (1 - self.alpha) * kwargs['prev_activation'] + (self.alpha * difference_x)
 
         # Distances are squared euclidean norm of differences.

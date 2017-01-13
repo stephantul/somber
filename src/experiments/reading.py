@@ -32,6 +32,6 @@ if __name__ == "__main__":
     X = o.transform(corpus)
 
     m = Merging((20, 20), 17, 0.3, alpha=0.001, beta=0.5)
-    m.train(MultiPlexer(X, 100), num_effective_epochs=1000)
+    m.train(MultiPlexer(X, 100), total_epochs=1000)
 
     whole = lambda x: m.predict(o.transform(x))
