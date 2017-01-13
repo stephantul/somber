@@ -42,6 +42,19 @@ def linear(value, current_step, total_steps):
 
 
 def progressbar(target, width=30, interval=0.01, idx_interval=10, use=True, mult=1):
+    """
+    Progressbar, partially borrowed from Keras:
+    https://github.com/fchollet/keras/blob/088dbe6866fd51f4e0e64866e442968c17abfa10/keras/utils/generic_utils.py
+
+    :param target: The target of the progressbar, must be some kind of iterable
+    :param width: The width of the progressbar in characters
+    :param interval: The time interval with which to update the bar.
+    :param idx_interval: The index interval with which to update the bar. Raise this if the bar is going too fast.
+    :param use: Boolean whetehr to actually use the progressbar (for debugging etc.)
+    :param mult: The multiplier to multiply the progressbar with, useful for accurately displaying batches.
+    e.g. instead of displaying 1/1000 batches of size 100, you can display 100/100000 items.
+    :return: None
+    """
 
     start = time.time()
     last_update = 0
