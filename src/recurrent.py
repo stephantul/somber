@@ -17,6 +17,13 @@ class Recurrent(Som):
         self.alpha = alpha
 
     def _train_loop(self, X, update_counter):
+        """
+        The train loop. Is a separate function to accomodate easy inheritance.
+
+        :param X: The input data.
+        :param update_counter: A list of indices at which the params need to be updated.
+        :return: None
+        """
 
         epoch = 0
         prev_activation = np.zeros((self.map_dim, self.data_dim))
@@ -75,11 +82,11 @@ class Recurrent(Som):
 
     def _predict_base(self, X):
         """
-        Predicts node identity for input data.
-        Similar to a clustering procedure.
+        Predicts distances to some input data.
 
-        :param x: The input data.
-        :return: A list of indices
+        :param X: The input data.
+        :return: An array of arrays, representing the activation
+        each node has to each input.
         """
 
         # Return the indices of the BMU which matches the input data most

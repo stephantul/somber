@@ -3,19 +3,42 @@ import sys
 import numpy as np
 
 
-def expo(value, current_epoch, lam):
+def expo(value, current_step, total_steps):
+    """
+    Decreases a value X_0
+    according to an exponential function with lambda equal to (-2.5 * (current_step / total_steps))
 
-    return value * np.exp(-current_epoch / lam)
+    :param value: The original value.
+    :param current_step: The current timestep
+    :return:
+    """
+
+    return value * np.exp(-2.5 * (current_step / total_steps))
 
 
-def static(value, current_epoch, total_epochs):
+def static(value, current_step, total_steps):
+    """
+    Static function: nothing changes.
+
+    :param value: the value
+    :return:
+    """
 
     return value
 
 
-def linear(value, current_epoch, total_epochs):
+def linear(value, current_step, total_steps):
+    """
+    Decrease a value X_0
+    According to a linear function.
 
-    return (value * (total_epochs - current_epoch) / total_epochs) + 0.5
+    :param value:
+    :param current_step:
+    :param total_steps:
+    :return:
+    """
+
+    return (value * (total_steps - current_step) / total_steps) + 0.01
 
 
 def progressbar(target, width=30, interval=0.01, idx_interval=10, use=True, mult=1):
@@ -109,8 +132,18 @@ def progressbar(target, width=30, interval=0.01, idx_interval=10, use=True, mult
 
 
 class MultiPlexer(object):
+    """
+    Multiplies a given np array n times.
+
+    """
 
     def __init__(self, array, times):
+        """
+        Multiplies a given np array n times.
+
+        :param array: The array to multiply.
+        :param times: The number of times to multiply this array.
+        """
 
         self.array = np.asarray(array)
         self.times = times

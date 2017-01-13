@@ -19,6 +19,13 @@ class Recursive(Som):
         self.beta = beta
 
     def _train_loop(self, X, update_counter):
+        """
+        The train loop. Is a separate function to accomodate easy inheritance.
+
+        :param X: The input data.
+        :param update_counter: A list of indices at which the params need to be updated.
+        :return: None
+        """
 
         epoch = 0
         influences = self._param_update(0, len(update_counter))
@@ -49,8 +56,8 @@ class Recursive(Som):
         activation, diff_x, diff_context = self._get_bmus(x, prev_activation=prev_activation)
 
         influence, bmu = self._apply_influences(activation, influences)
-        # Minibatch update of X and Y. Returns arrays of updates,
-        # one for each example.
+
+        # Update
         self.weights += self._calculate_update(diff_x, influence)
         self.context_weights += self._calculate_update(diff_context, influence[:, 0, np.newaxis])
 
@@ -72,7 +79,6 @@ class Recursive(Som):
         # Distances are squared euclidean norm of differences.
         # Since euclidean norm is sqrt(sum(square(x)))) we can leave out the sqrt
         # and avoid doing an extra square.
-        # Axis 2 because we are doing minibatches.
         distance_x = np.sum(np.square(difference_x), axis=1)
         distance_y = np.sum(np.square(difference_y), axis=1)
 
@@ -84,11 +90,11 @@ class Recursive(Som):
 
     def _predict_base(self, X):
         """
-        Predicts node identity for input data.
-        Similar to a clustering procedure.
+        Predicts distances to some input data.
 
-        :param x: The input data.
-        :return: A list of indices
+        :param X: The input data.
+        :return: An array of arrays, representing the activation
+        each node has to each input.
         """
 
         # Return the indices of the BMU which matches the input data most

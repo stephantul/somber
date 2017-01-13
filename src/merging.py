@@ -129,11 +129,11 @@ class Merging(Som):
 
     def _predict_base(self, X):
         """
-        Predicts node identity for input data.
-        Similar to a clustering procedure.
+        Predicts distances to some input data.
 
-        :param x: The input data.
-        :return: A list of indices
+        :param X: The input data.
+        :return: An array of arrays, representing the activation
+        each node has to each input.
         """
 
         # Return the indices of the BMU which matches the input data most

@@ -46,8 +46,6 @@ class Som(object):
             # Add small constant to sigma to prevent divide by zero for maps of size 2.
             self.sigma = (max(map_dim) / 2.0) + 0.01
 
-        self.lam = 0
-
         self.learning_rate = learning_rate
         self.map_dimensions = map_dim
         self.map_dim = reduce(np.multiply, map_dim, 1)
@@ -79,12 +77,6 @@ class Som(object):
         # Calculate the number of updates required
         num_updates = total_epochs * rough_epochs
 
-        # Decide on a value for lambda, depending on the function.
-        if self.nbfunc != linear:
-            self.lam = num_updates / np.log(self.sigma)
-        else:
-            self.lam = num_updates
-
         # The step size is the number of items between rough epochs.
         step_size = (X.shape[0] * rough_epochs) // num_updates
 
@@ -100,6 +92,13 @@ class Som(object):
         logger.info("Total train time: {0}".format(time.time() - start))
 
     def _train_loop(self, X, update_counter):
+        """
+        The train loop. Is a separate function to accomodate easy inheritance.
+
+        :param X: The input data.
+        :param update_counter: A list of indices at which the params need to be updated.
+        :return: None
+        """
 
         epoch = 0
 
@@ -133,7 +132,7 @@ class Som(object):
     def _param_update(self, epoch, num_epochs):
 
         learning_rate = self.lrfunc(self.learning_rate, epoch, num_epochs)
-        map_radius = self.nbfunc(self.sigma, epoch, self.lam)
+        map_radius = self.nbfunc(self.sigma, epoch, num_epochs)
 
         influences = self._calc_influence(map_radius) * learning_rate
 
