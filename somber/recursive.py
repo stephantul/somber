@@ -88,7 +88,7 @@ class Recursive(Som):
 
         # Invert activation so argmin can be used in downstream functions
         # more consistency.
-        activation = 1 - np.exp(-(self.alpha * distance_x + self.beta * distance_y))
+        activation = np.exp(-(self.alpha * distance_x + self.beta * distance_y))
 
         return activation, difference_x, difference_y
 
@@ -111,3 +111,41 @@ class Recursive(Som):
             distances.append(prev_activation)
 
         return distances
+
+    def _apply_influences(self, distances, influences):
+        """
+        First calculates the BMU.
+        Then gets the appropriate influence from the neighborhood, given the BMU
+
+        :param distances: A Numpy array of distances.
+        :param influences: A (map_dim, map_dim, data_dim) array describing the influence
+        each node has on each other node.
+        :return: The influence given the bmu, and the index of the bmu itself.
+        """
+
+        bmu = np.argmax(distances)
+        return influences[bmu], bmu
+
+    def quant_error(self, X):
+        """
+        Calculates the quantization error by taking the minimum euclidean
+        distance between the units and some input.
+
+        :param X: Input data.
+        :return: A vector of numbers, representing the quantization error
+        for each data point.
+        """
+
+        dist = self._predict_base(X)
+        return np.max(dist, axis=1)
+
+    def predict(self, X):
+        """
+        Predict the BMU for each input data.
+
+        :param X: Input data.
+        :return: The index of the bmu which best describes the input data.
+        """
+
+        dist = self._predict_base(X)
+        return np.argmax(dist, axis=1)

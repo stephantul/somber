@@ -4,6 +4,7 @@ import numpy as np
 
 from somber.utils import progressbar, expo, linear, static
 from functools import reduce
+from collections import defaultdict
 
 
 logger = logging.getLogger(__name__)
@@ -62,7 +63,7 @@ class Som(object):
         self.nbfunc = nbfunc
 
         # Initialize the distance grid: only needs to be done once.
-        self.distance_grid = self._init_distance_grid()
+        self.distance_grid = self._initialize_distance_grid()
 
         self.trained = False
 
@@ -152,9 +153,9 @@ class Som(object):
         learning_rate = self.lrfunc(self.learning_rate, iteration, num_iterations)
         map_radius = self.nbfunc(self.sigma, iteration, num_iterations)
 
-        influences = self._calc_influence(map_radius) * learning_rate
+        influences = self._calculate_influence(map_radius) * learning_rate
 
-        logging.info("RADIUS: {0}".format(map_radius))
+        logging.info("RADIUS: {0:.2f}".format(map_radius))
 
         return influences
 
@@ -242,7 +243,7 @@ class Som(object):
         dist = self._predict_base(X)
         return np.argmin(dist, axis=1)
 
-    def receptive_field(self, X):
+    def receptive_field(self, X, identities, window_size=5):
         """
         Calculate the receptive field of the SOM on some data.
 
@@ -252,10 +253,22 @@ class Som(object):
         gives a better description of the dynamics of a given system.
 
         :param X: Input data.
+        :param identities: The letters associated with each input datum.
+        :param window_size: The maximum length sequence we expect. Increasing the window size leads to accurate results,
+        but costs more memory.
         :return: The receptive field of each neuron.
         """
 
-        raise NotImplementedError("Currently not implemented")
+        assert len(X) == len(identities)
+
+        receptive_fields = defaultdict(list)
+        predictions = self.predict(X)
+
+        for idx, p in enumerate(predictions[window_size:]):
+
+            receptive_fields[p].append(identities[idx-(window_size+1): idx+1])
+
+        return receptive_fields
 
     def invert_projection(self, X, identities):
         """
@@ -297,7 +310,7 @@ class Som(object):
         bmu = np.argmin(distances)
         return influences[bmu], bmu
 
-    def _calc_influence(self, sigma):
+    def _calculate_influence(self, sigma):
         """
         Pre-calculates the influence for a given value of sigma.
 
@@ -312,7 +325,7 @@ class Som(object):
         neighborhood = np.exp(-1.0 * self.distance_grid / (2.0 * sigma ** 2)).reshape(self.map_dim, self.map_dim)
         return np.asarray([neighborhood] * self.data_dim).transpose((1, 2, 0))
 
-    def _init_distance_grid(self):
+    def _initialize_distance_grid(self):
         """
         Initializes the distance grid by calls to _grid_dist.
 
@@ -323,11 +336,11 @@ class Som(object):
 
         for i in range(self.map_dim):
 
-            distance_matrix[i] = self._grid_dist(i).reshape(1, self.map_dim)
+            distance_matrix[i] = self._grid_distance(i).reshape(1, self.map_dim)
 
         return distance_matrix
 
-    def _grid_dist(self, index):
+    def _grid_distance(self, index):
         """
         Calculates the distance grid for a single index position. This is pre-calculated for
         fast neighborhood calculations later on (see _calc_influence).

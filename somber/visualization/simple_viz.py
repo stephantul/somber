@@ -35,7 +35,7 @@ def context_map(contexts, width, height):
     plt.close()
     for idx, map in enumerate(contexts):
         f = plt.subplot(width, height, idx+1)
-        f.axes("off")
+        f.axis("off")
         plt.imshow(map.reshape(width, height))
 
     plt.show()
