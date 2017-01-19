@@ -1,6 +1,6 @@
 # **SOMBER**
 
-**somber** (**S**elf **O**rganizing **M**aps **B**y **E**nabling **R**ecurrence) is a collection of numpy/python implementations of various kinds of _Self-Organizing Maps_ (SOMS), with a focus on SOMs for sequence data.
+**somber** (**S**omber **O**rganizes **M**aps **B**y **E**nabling **R**ecurrence) is a collection of numpy/python implementations of various kinds of _Self-Organizing Maps_ (SOMS), with a focus on SOMs for sequence data.
 
 To the best of my knowledge, the sequential SOM algorithms implemented in this package haven't been open-sourced yet. If you do find examples, please let me know, so I can compare and link to them.
 
