@@ -33,7 +33,9 @@ The color dataset comes from this nice [blog]( https://codesachin.wordpress.com/
 )
 
 ```python3
-from somber.som import som
+import numpy as np
+
+from somber.som import Som
 from somber.utils import MultiPlexer
 
 X = np.array(
@@ -75,7 +77,7 @@ s.train(X, total_updates=10, stop_updates=0.5)
 # predict: get the index of each best matching unit.
 predictions = s.predict(X)
 # quantization error: how well do the best matching units fit?
-quantization_error = s.quant_error(x)
+quantization_error = s.quant_error(X)
 # inversion: associate each node with the x that fits best.
 inverted = s.invert_projection(X, color_names)
 # Mapping: get weights, mapped to the grid points of the SOM
@@ -93,7 +95,7 @@ In this example, I assume you have some text, encoded as one-hot vectors
 of alphabetic characters + space (hence dim == 27)
 
 ```python3
-from somber.recurrent import Recurrent
+from somber.recurrent import Recursive
 from somber.utils import reset_context_symbol
 
 # Some array of characters
@@ -105,7 +107,7 @@ reset = reset_context_symbol(text, [" "])
 # This is a dummy vectorize operation, not implemented!
 X = vectorize(text)
 
-r = Recurrent((10, 10), 27, 0.3, alpha=1.0, beta=1.0)
+r = Recursive((10, 10), 27, 0.3, alpha=1.0, beta=1.0)
 
 # Now, context will be reset at the indices corresponding to the spaces.
 # Therefore, the characters after the space are conditionally independent
