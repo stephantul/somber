@@ -16,32 +16,55 @@ class Recurrent(Som):
         super().__init__(map_dim, dim, learning_rate, lrfunc, nbfunc, sigma)
         self.alpha = alpha
 
-    def _train_loop(self, X, update_counter, context_mask):
+    def _train_loop(self, X, num_epochs, lr_update_counter, nb_update_counter, context_mask, show_progressbar):
         """
         The train loop. Is a separate function to accomodate easy inheritance.
 
         :param X: The input data.
-        :param update_counter: A list of indices at which the params need to be updated.
+        :param lr_update_counter: A list of indices at which the params need to be updated.
         :param context_mask: A list of zeroes and ones.
         :return: None
         """
 
-        epoch = 0
+        nb_step = 0
+        lr_step = 0
+        update = False
+
         prev_activation = np.zeros((self.map_dim, self.data_dim))
-        influences, learning_rates = self._param_update(0, len(update_counter))
 
-        for idx, x in enumerate(progressbar(X)):
+        map_radius = self.nbfunc(self.sigma, 0, len(nb_update_counter))
+        learning_rate = self.lrfunc(self.learning_rate, 0, len(lr_update_counter))
+        influences = self._param_update(0, max(len(lr_update_counter), len(nb_update_counter)))
 
-            prev_activation = self._example(x, influences, prev_activation=prev_activation)
+        idx = 0
 
-            if idx in update_counter:
+        for epoch in progressbar(range(num_epochs), use=show_progressbar):
 
-                epoch += 1
-                influences, learning_rate = self._param_update(epoch, len(update_counter))
+            for x in X:
 
-            if idx in context_mask:
+                prev_activation = self._example(x, influences, prev_activation=prev_activation)
 
-                prev_activation = np.zeros((self.map_dim, self.data_dim))
+                if idx in nb_update_counter:
+                    nb_step += 1
+
+                    map_radius = self.nbfunc(self.sigma, nb_step, len(nb_update_counter))
+                    logger.info("Updated map radius: {0}".format(map_radius))
+                    update = True
+
+                if idx in lr_update_counter:
+
+                    lr_step += 1
+
+                    learning_rate = self.lrfunc(self.learning_rate, lr_step, len(lr_update_counter))
+                    logger.info("Updated learning rate: {0}".format(learning_rate))
+                    update = True
+
+                if update:
+
+                    influences = self._calculate_influence(map_radius) * learning_rate
+                    update = False
+
+                idx += 1
 
     def _example(self, x, influences, **kwargs):
         """

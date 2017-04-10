@@ -4,6 +4,7 @@ import logging
 
 from somber.som import Som
 from somber.utils import expo, progressbar
+from collections import Counter
 
 
 logger = logging.getLogger(__name__)
@@ -20,34 +21,57 @@ class Merging(Som):
         self.context_weights = np.ones(self.weights.shape)
         self.entropy = 0
 
-    def _train_loop(self, X, update_counter, context_mask):
+    def _train_loop(self, X, num_epochs, lr_update_counter, nb_update_counter, context_mask, show_progressbar):
 
-        self.context_weights *= X.mean(axis=0)
+        # Don't use asserts, these can be disabled
+        if X.shape[-1] != self.data_dim:
+            raise ValueError("Data dim does not match dimensionality of the data")
 
-        epoch = 0
+        nb_step = 0
+        lr_step = 0
+
+        # Calculate the influences for update 0.
+        map_radius = self.nbfunc(self.sigma, 0, len(nb_update_counter))
+        learning_rate = self.lrfunc(self.learning_rate, 0, len(lr_update_counter))
+        influences = self._calculate_influence(map_radius) * learning_rate
+        update = False
+        print(nb_update_counter)
+        print(lr_update_counter)
+
         bmu = None
-        influences = self._param_update(0, len(update_counter))
 
-        bmu_entropy = np.zeros((self.map_dim,))
-        update = 0
+        bmus = []
+        prev_update = 0
 
-        for idx, x in enumerate(progressbar(X)):
+        idx = 0
 
-            bmu = self._example(x, influences, prev_bmu=bmu)
-            bmu_entropy[bmu] += 1
+        for epoch in progressbar(range(num_epochs), use=show_progressbar):
 
-            if idx in update_counter:
+            for x in X:
 
-                update = self._entropy(prev_bmus=bmu_entropy, prev_update=update)
-                self.alpha += update
-                self.alpha = np.clip(self.alpha, 0.0, 1.0)
+                bmu = self._example(x, influences, prev_bmu=bmu)
+                bmus.append(bmu)
 
-                epoch += 1
-                influences = self._param_update(epoch, len(update_counter))
+                if idx in nb_update_counter:
+                    nb_step += 1
 
-            if idx in context_mask:
+                    map_radius = self.nbfunc(self.sigma, nb_step, len(nb_update_counter))
+                    logger.info("Updated map radius: {0}".format(map_radius))
+                    update = True
 
-                bmu = None
+                if idx in lr_update_counter:
+                    lr_step += 1
+
+                    learning_rate = self.lrfunc(self.learning_rate, lr_step, len(lr_update_counter))
+                    logger.info("Updated learning rate: {0}".format(learning_rate))
+                    update = True
+
+                if update:
+                    influences = self._calculate_influence(map_radius) * learning_rate
+                    prev_update = self._entropy(Counter(bmus), prev_update)
+                    update = False
+
+                idx += 1
 
     def _example(self, x, influences, **kwargs):
         """
@@ -59,7 +83,6 @@ class Merging(Som):
         :return: The best matching unit
         """
 
-        # context = kwargs['context']
         prev_bmu = kwargs['prev_bmu']
 
         if prev_bmu is None:
@@ -96,7 +119,8 @@ class Merging(Som):
         :return:
         """
 
-        prev_bmus /= prev_bmus.sum()
+        prev_bmus = np.array(list(prev_bmus.values()))
+        prev_bmus = prev_bmus / np.sum(prev_bmus)
 
         new_entropy = -np.sum(prev_bmus * np.nan_to_num(np.log2(prev_bmus)))
         entropy_diff = (new_entropy - self.entropy)

@@ -4,7 +4,8 @@ import numpy as np
 
 from somber.utils import progressbar, expo, linear, static
 from functools import reduce
-from collections import defaultdict
+from collections import defaultdict, Counter, OrderedDict
+from sklearn.decomposition.pca import PCA
 
 
 logger = logging.getLogger(__name__)
@@ -21,7 +22,8 @@ class Som(object):
                  learning_rate,
                  lrfunc=expo,
                  nbfunc=expo,
-                 sigma=None):
+                 sigma=None,
+                 min_max=np.argmin):
         """
 
         :param map_dim: A tuple of map dimensions, e.g. (10, 10) instantiates a 10 by 10 map.
@@ -54,7 +56,7 @@ class Som(object):
         # Weights are initialized to small random values.
         # Initializing to more appropriate values given the dataset
         # will probably give faster convergence.
-        self.weights = np.random.uniform(-0.1, 0.1, size=(self.map_dim, dim))
+        self.weights = np.zeros((self.map_dim, dim))
         self.data_dim = dim
 
         # The function used to diminish the learning rate.
@@ -64,10 +66,10 @@ class Som(object):
 
         # Initialize the distance grid: only needs to be done once.
         self.distance_grid = self._initialize_distance_grid()
-
+        self.min_max = min_max
         self.trained = False
 
-    def train(self, X, total_updates=10, stop_updates=1.0, context_mask=()):
+    def train(self, X, num_epochs, total_updates=1000, stop_lr_updates=1.0, stop_nb_updates=1.0, context_mask=(), show_progressbar=False):
         """
         Fits the SOM to some data.
         The updates correspond to the number of updates to the parameters
@@ -77,7 +79,7 @@ class Som(object):
 
         :param X: the data on which to train.
         :param total_updates: The number of updates to the parameters to do during training.
-        :param stop_updates: A fraction, describing over which portion of the training data
+        :param stop_lr_updates: A fraction, describing over which portion of the training data
         the neighborhood and learning rate should decrease. If the total number of updates, for example
         is 1000, and stop_updates = 0.5, 1000 updates will have occurred after half of the examples.
         After this period, no updates of the parameters will occur.
@@ -87,42 +89,101 @@ class Som(object):
         :return: None
         """
 
+        if not self.trained:
+            min_ = np.min(X, axis=0)
+            random = np.random.rand(self.map_dim).reshape((self.map_dim, 1))
+            temp = np.outer(random, np.abs(np.max(X, axis=0) - min_))
+            self.weights = min_ + temp
+
+        train_length = len(X) * num_epochs
+
         # The step size is the number of items between rough epochs.
-        step_size = (X.shape[0] * stop_updates) // total_updates
+        # We use len instead of shape because len also works with np.flatiter
+        step_size_lr = max((train_length * stop_lr_updates) // total_updates, 1)
+        step_size_nb = max((train_length * stop_nb_updates) // total_updates, 1)
+
+        if step_size_lr == 1 or step_size_nb == 1:
+            logger.warning("step size of learning rate or neighborhood is 1")
+
+        logger.info("{0} items, {1} epochs, total length: {2}".format(len(X), num_epochs, train_length))
 
         # Precalculate the number of updates.
-        update_counter = np.arange(step_size, (X.shape[0] * stop_updates) + step_size, step_size)
+        lr_update_counter = np.arange(step_size_lr, (train_length * stop_lr_updates) + step_size_lr, step_size_lr)
+        nb_update_counter = np.arange(step_size_nb, (train_length * stop_nb_updates) + step_size_nb, step_size_nb)
         start = time.time()
 
         # Train
-        self._train_loop(X, update_counter, context_mask=context_mask)
+        self._train_loop(X, num_epochs, lr_update_counter, nb_update_counter, context_mask, show_progressbar)
         self.trained = True
 
         logger.info("Total train time: {0}".format(time.time() - start))
 
-    def _train_loop(self, X, update_counter, context_mask):
+    def _init_pca(self, X):
+
+        coordinates = []
+        coordinates.append(np.arange(self.map_dim) // self.map_dimensions[1])
+        coordinates.append(np.arange(self.map_dim) % self.map_dimensions[1])
+        coordinates = np.array(coordinates).T
+
+        data = (X - np.mean(X, axis=0))
+        tmp_matrix = np.tile(np.mean(X, axis=0), (self.map_dim, 1))
+
+        pca = PCA(n_components=2, svd_solver='randomized')
+        pca.fit(data)
+        components = (pca.components_.T / np.sqrt(np.sum(np.square(pca.components_), axis=1)))
+        components *= pca.explained_variance_
+        components = components.T
+
+        for j in range(self.map_dim):
+            tmp_matrix[j] += coordinates[j, :] * components
+
+        return tmp_matrix
+
+    def _train_loop(self, X, num_epochs, lr_update_counter, nb_update_counter, context_mask, show_progressbar):
         """
         The train loop. Is a separate function to accomodate easy inheritance.
 
         :param X: The input data.
-        :param update_counter: A list of indices at which the params need to be updated.
+        :param lr_update_counter: A list of indices at which the params need to be updated.
         :param context_mask: Not used in the standard SOM.
         :return: None
         """
 
-        step = 0
+        nb_step = 0
+        lr_step = 0
 
         # Calculate the influences for update 0.
-        influences = self._param_update(0, len(update_counter))
+        map_radius = self.nbfunc(self.sigma, 0, len(nb_update_counter))
+        learning_rate = self.lrfunc(self.learning_rate, 0, len(lr_update_counter))
+        influences = self._calculate_influence(map_radius) * learning_rate
+        update = False
 
-        for idx, x in enumerate(progressbar(X)):
+        idx = 0
 
-            self._example(x, influences)
+        for epoch in range(num_epochs):
 
-            if idx in update_counter:
-                step += 1
+            for x in progressbar(X, use=show_progressbar):
 
-                influences = self._param_update(step, len(update_counter))
+                self._example(x, influences)
+
+                if idx in nb_update_counter:
+                    nb_step += 1
+
+                    map_radius = self.nbfunc(self.sigma, nb_step, len(nb_update_counter))
+                    update = True
+
+                if idx in lr_update_counter:
+                    lr_step += 1
+
+                    learning_rate = self.lrfunc(self.learning_rate, lr_step, len(lr_update_counter))
+                    update = True
+
+                if update:
+
+                    influences = self._calculate_influence(map_radius) * learning_rate
+                    update = False
+
+                idx += 1
 
     def _example(self, x, influences, **kwargs):
         """
@@ -138,26 +199,7 @@ class Som(object):
         influences, bmu = self._apply_influences(activation, influences)
         self.weights += self._calculate_update(difference_x, influences)
 
-        return bmu
-
-    def _param_update(self, iteration, num_iterations):
-        """
-        Updates the parameters of the model. Encapsulated into a function for
-        easy inheritance.
-
-        :param iteration: The current iteration
-        :param num_iterations: The total number of iterations.
-        :return: The influences for the current epoch.
-        """
-
-        learning_rate = self.lrfunc(self.learning_rate, iteration, num_iterations)
-        map_radius = self.nbfunc(self.sigma, iteration, num_iterations)
-
-        influences = self._calculate_influence(map_radius) * learning_rate
-
-        logging.info("RADIUS: {0:.2f}".format(map_radius))
-
-        return influences
+        return activation
 
     def _calculate_update(self, difference_vector, influence):
         """
@@ -189,7 +231,7 @@ class Som(object):
         differences = self._distance_difference(x, self.weights)
 
         # squared euclidean distance.
-        activations = np.sqrt(np.sum(np.square(differences), axis=1))
+        activations = np.sum(np.square(differences), axis=1)
         return activations, differences
 
     def _distance_difference(self, x, weights):
@@ -200,6 +242,7 @@ class Som(object):
         :param weights: An array of weights.
         :return: A vector of differences.
         """
+
         return x - weights
 
     def _predict_base(self, X):
@@ -241,9 +284,9 @@ class Som(object):
         """
 
         dist = self._predict_base(X)
-        return np.argmin(dist, axis=1)
+        return self.min_max(dist, axis=1)
 
-    def receptive_field(self, X, identities, window_size=5):
+    def receptive_field(self, X, identities, max_len=5, threshold=0.9):
         """
         Calculate the receptive field of the SOM on some data.
 
@@ -254,7 +297,8 @@ class Som(object):
 
         :param X: Input data.
         :param identities: The letters associated with each input datum.
-        :param window_size: The maximum length sequence we expect. Increasing the window size leads to accurate results,
+        :param max_len: The maximum length sequence we expect.
+        Increasing the window size leads to accurate results,
         but costs more memory.
         :return: The receptive field of each neuron.
         """
@@ -264,11 +308,31 @@ class Som(object):
         receptive_fields = defaultdict(list)
         predictions = self.predict(X)
 
-        for idx, p in enumerate(predictions[window_size:]):
+        for idx, p in enumerate(predictions):
 
-            receptive_fields[p].append(identities[idx-(window_size+1): idx+1])
+            receptive_fields[p].append(identities[idx+1 - max_len:idx+1])
 
-        return receptive_fields
+        sequence = defaultdict(list)
+
+        for k, v in receptive_fields.items():
+
+            v = [x for x in v if x]
+
+            total = len(v)
+            v = ["".join([str(x_) for x_ in x]) for x in v]
+
+            for row in reversed(list(zip(*v))):
+
+                r = Counter(row)
+
+                for _, count in r.items():
+                    if count / total > threshold:
+                        sequence[k].append(row[0])
+                    else:
+                        break
+
+        return ({k: v[::-1] for k, v in sequence.items()},
+                {k: Counter(["".join(x) for x in v]) for k, v in receptive_fields.items()})
 
     def invert_projection(self, X, identities):
         """
@@ -278,7 +342,8 @@ class Som(object):
         Works best for symbolic (instead of continuous) input data.
 
         :param X: Input data
-        :param identities: The identities for each input datum, must be same length as X
+        :param identities: The identities for each
+        input datum, must be same length as X
         :return: A numpy array with identities, the shape of the map.
         """
 
@@ -288,26 +353,26 @@ class Som(object):
         X_unique, names = zip(*set([tuple((tuple(s), n)) for s, n in zip(X, identities)]))
         node_match = []
 
-        for node in self.weights:
+        for node in list(self.weights):
 
             differences = self._distance_difference(node, X_unique)
-            distances = np.sqrt(np.sum(np.square(differences), axis=1))
+            distances = np.sum(np.square(differences), axis=1)
             node_match.append(names[np.argmin(distances)])
 
-        return np.array(node_match).reshape(self.map_dimensions)
+        return np.array(node_match)
 
-    def _apply_influences(self, distances, influences):
+    def _apply_influences(self, activations, influences):
         """
         First calculates the BMU.
         Then gets the appropriate influence from the neighborhood, given the BMU
 
-        :param distances: A Numpy array of distances.
+        :param activations: A Numpy array of distances.
         :param influences: A (map_dim, map_dim, data_dim) array describing the influence
         each node has on each other node.
         :return: The influence given the bmu, and the index of the bmu itself.
         """
 
-        bmu = np.argmin(distances)
+        bmu = self.min_max(activations)
         return influences[bmu], bmu
 
     def _calculate_influence(self, sigma):
@@ -322,7 +387,7 @@ class Som(object):
         :return: The neighborhood, reshaped into an array
         """
 
-        neighborhood = np.exp(-1.0 * self.distance_grid / (2.0 * sigma ** 2)).reshape(self.map_dim, self.map_dim)
+        neighborhood = np.exp(-self.distance_grid / (2.0 * sigma ** 2)).reshape(self.map_dim, self.map_dim)
         return np.asarray([neighborhood] * self.data_dim).transpose((1, 2, 0))
 
     def _initialize_distance_grid(self):
@@ -332,13 +397,7 @@ class Som(object):
         :return:
         """
 
-        distance_matrix = np.zeros((self.map_dim, self.map_dim))
-
-        for i in range(self.map_dim):
-
-            distance_matrix[i] = self._grid_distance(i).reshape(1, self.map_dim)
-
-        return distance_matrix
+        return np.array([self._grid_distance(i).reshape(1, self.map_dim) for i in range(self.map_dim)])
 
     def _grid_distance(self, index):
         """
@@ -351,8 +410,8 @@ class Som(object):
 
         width, height = self.map_dimensions
 
-        column = int(index % width)
         row = index // width
+        column = index % width
 
         r = np.arange(height)[:, np.newaxis]
         c = np.arange(width)

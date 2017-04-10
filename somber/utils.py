@@ -184,6 +184,10 @@ class MultiPlexer(object):
             return self.array.mean()
         return self.array.mean(axis=axis)
 
+    def __len__(self):
+
+        return self.new_shape[0]
+
 
 def reset_context_symbol(X, symbols):
     """

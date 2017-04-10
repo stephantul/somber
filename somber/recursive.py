@@ -13,37 +13,64 @@ class Recursive(Som):
 
     def __init__(self, map_dim, dim, learning_rate, alpha, beta, sigma=None, lrfunc=expo, nbfunc=expo):
 
-        super().__init__(map_dim, dim, learning_rate, lrfunc, nbfunc, sigma)
-        self.context_weights = np.random.uniform(0.0, 1.0, (self.map_dim, self.map_dim))
+        super().__init__(map_dim, dim, learning_rate, lrfunc, nbfunc, sigma, min_max=np.argmax)
+        self.context_weights = np.zeros((self.map_dim, self.map_dim))
         self.alpha = alpha
         self.beta = beta
 
-    def _train_loop(self, X, update_counter, context_mask):
+    def _train_loop(self, X, num_epochs, lr_update_counter, nb_update_counter, context_mask, show_progressbar):
         """
         The train loop. Is a separate function to accomodate easy inheritance.
 
         :param X: The input data.
-        :param update_counter: A list of indices at which the params need to be updated.
+        :param lr_update_counter: A list of indices at which the params need to be updated.
         :return: None
         """
 
-        epoch = 0
-        influences = self._param_update(0, len(update_counter))
+        # Don't use asserts, these can be disabled
+        if X.shape[-1] != self.data_dim:
+            raise ValueError("Data dim does not match dimensionality of the data")
 
-        prev_activation = np.zeros((self.map_dim,))
+        nb_step = 0
+        lr_step = 0
 
-        for idx, x in enumerate(progressbar(X)):
+        # Calculate the influences for update 0.
+        map_radius = self.nbfunc(self.sigma, 0, len(nb_update_counter))
+        learning_rate = self.lrfunc(self.learning_rate, 0, len(lr_update_counter))
+        influences = self._calculate_influence(map_radius) * learning_rate
+        update = False
 
-            prev_activation = self._example(x, influences, prev_activation=prev_activation)
+        idx = 0
 
-            if idx in update_counter:
+        for epoch in range(num_epochs):
 
-                epoch += 1
-                influences = self._param_update(epoch, len(update_counter))
+            prev_activation = np.zeros((self.map_dim,))
 
-            if idx in context_mask:
+            for x in progressbar(X, use=show_progressbar):
 
-                prev_activation = np.zeros((self.map_dim,))
+                prev_activation = self._example(x, influences, prev_activation=prev_activation)
+
+                if idx in nb_update_counter:
+                    nb_step += 1
+
+                    map_radius = self.nbfunc(self.sigma, nb_step, len(nb_update_counter))
+                    logger.info("Updated map radius: {0}".format(map_radius))
+                    update = True
+
+                if idx in lr_update_counter:
+
+                    lr_step += 1
+
+                    learning_rate = self.lrfunc(self.learning_rate, lr_step, len(lr_update_counter))
+                    logger.info("Updated learning rate: {0}".format(learning_rate))
+                    update = True
+
+                if update:
+
+                    influences = self._calculate_influence(map_radius) * learning_rate
+                    update = False
+
+                idx += 1
 
     def _example(self, x, influences, **kwargs):
         """
@@ -67,6 +94,19 @@ class Recursive(Som):
 
         return activation
 
+    def quant_error(self, X):
+        """
+        Calculates the quantization error by taking the minimum euclidean
+        distance between the units and some input.
+
+        :param X: Input data.
+        :return: A vector of numbers, representing the quantization error
+        for each data point.
+        """
+
+        dist = self._predict_base(X)
+        return 1.0 - np.max(dist, axis=1)
+
     def _get_bmus(self, x, **kwargs):
         """
         Gets the best matching units, based on euclidean distance.
@@ -86,9 +126,7 @@ class Recursive(Som):
         distance_x = np.sum(np.square(difference_x), axis=1)
         distance_y = np.sum(np.square(difference_y), axis=1)
 
-        # Invert activation so argmin can be used in downstream functions
-        # more consistency.
-        activation = np.exp(-(self.alpha * distance_x + self.beta * distance_y))
+        activation = np.exp(-(self.alpha * distance_x) - (self.beta * distance_y))
 
         return activation, difference_x, difference_y
 
@@ -104,48 +142,32 @@ class Recursive(Som):
         # Return the indices of the BMU which matches the input data most
         distances = []
 
-        prev_activation = np.zeros((self.map_dim,))
+        prev_activation = np.sum(np.square(self._distance_difference(X[0], self.weights)), axis=1)
+        distances.append(prev_activation)
 
-        for x in X:
+        for x in X[1:]:
             prev_activation, _, _ = self._get_bmus(x, prev_activation=prev_activation)
             distances.append(prev_activation)
 
         return distances
 
-    def _apply_influences(self, distances, influences):
-        """
-        First calculates the BMU.
-        Then gets the appropriate influence from the neighborhood, given the BMU
+    def generate(self, number_of_steps, starting_activation=None):
 
-        :param distances: A Numpy array of distances.
-        :param influences: A (map_dim, map_dim, data_dim) array describing the influence
-        each node has on each other node.
-        :return: The influence given the bmu, and the index of the bmu itself.
-        """
+        if starting_activation is None:
+            starting_activation = np.zeros((1, self.data_dim,))
 
-        bmu = np.argmax(distances)
-        return influences[bmu], bmu
+        prev_activation = np.zeros((self.map_dim,))
 
-    def quant_error(self, X):
-        """
-        Calculates the quantization error by taking the minimum euclidean
-        distance between the units and some input.
+        for x in starting_activation:
+            prev_activation, _, _ = self._get_bmus(x, prev_activation=prev_activation)
 
-        :param X: Input data.
-        :return: A vector of numbers, representing the quantization error
-        for each data point.
-        """
+        generated = []
 
-        dist = self._predict_base(X)
-        return np.max(dist, axis=1)
+        p = self.min_max(prev_activation)
 
-    def predict(self, X):
-        """
-        Predict the BMU for each input data.
+        for x in range(number_of_steps):
+            prev_activation, _, _ = self._get_bmus(self.weights[p], prev_activation=prev_activation)
+            p = self.min_max(prev_activation)
+            generated.append(p)
 
-        :param X: Input data.
-        :return: The index of the bmu which best describes the input data.
-        """
-
-        dist = self._predict_base(X)
-        return np.argmax(dist, axis=1)
+        return generated
