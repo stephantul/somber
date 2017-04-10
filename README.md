@@ -110,9 +110,7 @@ r.train(X, context_mask=reset)
 
 ### TODO
 
-* _Implement Gamma SOM_: The Gamma SOM is a generalization of the MSOM, i.e. a MSOM is a Gamma SOM with k == 1, where k is the number of timesteps of context which is taken into account when determining the current winner.
-
-* _Investigate whether batching works for RSOM, RECSOM_: The implementations of RSOM and RECSOM are correct. Therefore, it should be relatively easy to show whether these can be batched/parallelized. My hunch is that this is not possible out of the box, i.e. without extra regularization mechanisms.
+See issues for TODOs/enhancements. If you use SOMBER, feel free to send me suggestions!
 
 ### Contributors
 
