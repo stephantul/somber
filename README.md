@@ -36,7 +36,6 @@ The color dataset comes from this nice [blog]( https://codesachin.wordpress.com/
 import numpy as np
 
 from somber.som import Som
-from somber.utils import MultiPlexer
 
 X = np.array(
      [[0., 0., 0.],
@@ -55,13 +54,6 @@ X = np.array(
       [.5, .5, .5],
       [.66, .66, .66]])
 
-# Use a MultiPlexer to string your data together
-# while still having some of the underlying
-# numpy functionality (shapes, mean)
-
-# 1000 times the data, 1 times the memory
-X = MultiPlexer(X, 1000)
-
 color_names = \
     ['black', 'blue', 'darkblue', 'skyblue',
      'greyblue', 'lilac', 'green', 'red',
@@ -72,13 +64,13 @@ color_names = \
 s = Som((10, 10), dim=3, learning_rate=0.3)
 
 # train
-s.train(X, total_updates=10, stop_updates=0.5)
+s.train(X, num_epochs=100, total_updates=100, stop_updates=0.5)
 
 # predict: get the index of each best matching unit.
 predictions = s.predict(X)
 # quantization error: how well do the best matching units fit?
 quantization_error = s.quant_error(X)
-# inversion: associate each node with the x that fits best.
+# inversion: associate each node with the exemplar that fits best.
 inverted = s.invert_projection(X, color_names)
 # Mapping: get weights, mapped to the grid points of the SOM
 mapped = s.map_weights()
@@ -117,8 +109,6 @@ r.train(X, context_mask=reset)
 ```
 
 ### TODO
-
-* _Verify the workings of the MSOM_: I attempted replication of some of the reported experiments by Hammer and Strickert. No luck in replicating these yet, possibly due to my interpretation of the entropy-based control mechanism.
 
 * _Implement Gamma SOM_: The Gamma SOM is a generalization of the MSOM, i.e. a MSOM is a Gamma SOM with k == 1, where k is the number of timesteps of context which is taken into account when determining the current winner.
 
