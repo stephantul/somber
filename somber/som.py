@@ -95,6 +95,9 @@ class Som(object):
             temp = np.outer(random, np.abs(np.max(X, axis=0) - min_))
             self.weights = min_ + temp
 
+        if not np.any(context_mask):
+            context_mask = np.ones((len(X), 1))
+
         train_length = len(X) * num_epochs
 
         # The step size is the number of items between rough epochs.

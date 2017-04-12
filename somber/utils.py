@@ -206,4 +206,8 @@ def reset_context_symbol(X, symbols):
     continue, and 0 in places it should be reset.
     """
 
-    return [idx for idx, x in enumerate(X) if x in symbols]
+    indices = [idx for idx, x in enumerate(X) if x in symbols]
+    mask = np.ones((len(X), 1))
+    mask[indices] = 0
+
+    return mask

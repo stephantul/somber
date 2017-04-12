@@ -41,9 +41,11 @@ class Recursive(Som):
 
             prev_activation = np.zeros((X.shape[1], self.map_dim))
 
-            for x in progressbar(X, mult=X.shape[1], use=show_progressbar):
+            for x, ct in progressbar(zip(X, context_mask), mult=X.shape[1], use=show_progressbar):
 
                 prev_activation = self._example(x, influences, prev_activation=prev_activation)
+
+                prev_activation *= ct
 
                 if idx in nb_update_counter:
                     nb_step += 1

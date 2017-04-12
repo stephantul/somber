@@ -64,10 +64,20 @@ class Som(Base_Som):
         :return: None
         """
 
+        if not self.trained:
+            min_ = np.min(X, axis=0)
+            random = np.random.rand(self.map_dim).reshape((self.map_dim, 1))
+            temp = np.outer(random, np.abs(np.max(X, axis=0) - min_))
+            self.weights = min_ + temp
+
         # The train length
         train_length = (len(X) * num_epochs) // batch_size
 
+        if not np.any(context_mask):
+            context_mask = np.ones((len(X), 1))
+
         X = self._create_batches(X, batch_size)
+        context_mask = self._create_batches(context_mask, batch_size)
 
         # The step size is the number of items between rough epochs.
         # We use len instead of shape because len also works with np.flatiter
@@ -97,6 +107,7 @@ class Som(Base_Som):
         :param batch_size: The desired batch size.
         :return: A batched version of your data.
         """
+
         return np.resize(X, (int(np.ceil(X.shape[0] / batch_size)), batch_size, X.shape[1]))
 
     def _example(self, x, influences, **kwargs):
