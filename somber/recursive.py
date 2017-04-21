@@ -1,9 +1,10 @@
 import numpy as np
 import logging
 import time
+import json
 
 from somber.som import Som
-from somber.utils import expo, progressbar
+from somber.utils import expo, progressbar, linear
 
 
 logger = logging.getLogger(__name__)
@@ -14,65 +15,100 @@ class Recursive(Som):
     def __init__(self, map_dim, dim, learning_rate, alpha, beta, sigma=None, lrfunc=expo, nbfunc=expo):
 
         super().__init__(map_dim, dim, learning_rate, lrfunc, nbfunc, sigma, min_max=np.argmax)
-        self.context_weights = np.zeros((self.map_dim, self.map_dim))
+        self.context_weights = np.zeros((self.map_dim, self.map_dim), dtype=np.float32)
         self.alpha = alpha
         self.beta = beta
 
-    def _train_loop(self, X, num_epochs, lr_update_counter, nb_update_counter, context_mask, show_progressbar):
-        """
-        The train loop. Is a separate function to accomodate easy inheritance.
+    @classmethod
+    def load(cls, path):
 
-        :param X: The input data.
-        :param lr_update_counter: A list of indices at which the params need to be updated.
-        :return: None
-        """
+        data = json.load(open(path))
 
-        # Don't use asserts, these can be disabled
-        if X.shape[-1] != self.data_dim:
-            raise ValueError("Data dim does not match dimensionality of the data")
+        weights = data['weights']
+        weights = np.array(weights, dtype=np.float32)
+        datadim = weights.shape[1]
 
-        nb_step = 0
-        lr_step = 0
+        dimensions = data['dimensions']
+        lrfunc = expo if data['lrfunc'] == 'expo' else linear
+        nbfunc = expo if data['nbfunc'] == 'expo' else linear
+        lr = data['lr']
+        sigma = data['sigma']
+
+        try:
+            context_weights = data['context_weights']
+            context_weights = np.array(context_weights, dtype=np.float32)
+        except KeyError:
+            context_weights = np.zeros((len(weights), len(weights)))
+
+
+        try:
+            alpha = data['alpha']
+            beta = data['beta']
+        except KeyError:
+            alpha = 3.0
+            beta = 1.0
+
+        s = cls(dimensions, datadim, lr, lrfunc=lrfunc, nbfunc=nbfunc, sigma=sigma, alpha=alpha, beta=beta)
+        s.weights = weights
+        s.context_weights = context_weights
+        s.trained = True
+
+        return s
+
+    def save(self, path):
+
+        dicto = {}
+        dicto['weights'] = [[float(w) for w in x] for x in self.weights]
+        dicto['context_weights'] = [[float(w) for w in x] for x in self.context_weights]
+        dicto['dimensions'] = self.map_dimensions
+        dicto['lrfunc'] = 'expo' if self.lrfunc == expo else 'linear'
+        dicto['nbfunc'] = 'expo' if self.nbfunc == expo else 'linear'
+        dicto['lr'] = self.learning_rate
+        dicto['sigma'] = self.sigma
+        dicto['alpha'] = self.alpha
+        dicto['beta'] = self.beta
+
+        json.dump(dicto, open(path, 'w'))
+
+    def _epoch(self, X, nb_update_counter, lr_update_counter, idx, nb_step, lr_step, show_progressbar, context_mask):
+
+        prev_activation = np.zeros((self.map_dim,))
 
         # Calculate the influences for update 0.
-        map_radius = self.nbfunc(self.sigma, 0, len(nb_update_counter))
-        learning_rate = self.lrfunc(self.learning_rate, 0, len(lr_update_counter))
+        map_radius = self.nbfunc(self.sigma, nb_step, len(nb_update_counter))
+        learning_rate = self.lrfunc(self.learning_rate, lr_step, len(lr_update_counter))
         influences = self._calculate_influence(map_radius) * learning_rate
         update = False
 
-        idx = 0
+        for x, ct in progressbar(zip(X, context_mask), use=show_progressbar):
 
-        for epoch in range(num_epochs):
+            prev_activation = self._example(x, influences, prev_activation=prev_activation)
 
-            prev_activation = np.zeros((self.map_dim,))
+            prev_activation *= ct
 
-            for x, ct in progressbar(zip(X, context_mask), use=show_progressbar):
+            if idx in nb_update_counter:
+                nb_step += 1
 
-                prev_activation = self._example(x, influences, prev_activation=prev_activation)
+                map_radius = self.nbfunc(self.sigma, nb_step, len(nb_update_counter))
+                logger.info("Updated map radius: {0}".format(map_radius))
+                update = True
 
-                prev_activation *= ct
+            if idx in lr_update_counter:
 
-                if idx in nb_update_counter:
-                    nb_step += 1
+                lr_step += 1
 
-                    map_radius = self.nbfunc(self.sigma, nb_step, len(nb_update_counter))
-                    logger.info("Updated map radius: {0}".format(map_radius))
-                    update = True
+                learning_rate = self.lrfunc(self.learning_rate, lr_step, len(lr_update_counter))
+                logger.info("Updated learning rate: {0}".format(learning_rate))
+                update = True
 
-                if idx in lr_update_counter:
+            if update:
 
-                    lr_step += 1
+                influences = self._calculate_influence(map_radius) * learning_rate
+                update = False
 
-                    learning_rate = self.lrfunc(self.learning_rate, lr_step, len(lr_update_counter))
-                    logger.info("Updated learning rate: {0}".format(learning_rate))
-                    update = True
+            idx += 1
 
-                if update:
-
-                    influences = self._calculate_influence(map_radius) * learning_rate
-                    update = False
-
-                idx += 1
+        return idx, nb_step, lr_step
 
     def _example(self, x, influences, **kwargs):
         """

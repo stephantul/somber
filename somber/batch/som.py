@@ -91,7 +91,26 @@ class Som(Base_Som):
         start = time.time()
 
         # Train
-        self._train_loop(X, num_epochs, lr_update_counter, nb_update_counter, context_mask, show_progressbar)
+        nb_step = 0
+        lr_step = 0
+
+        # Calculate the influences for update 0.
+
+        idx = 0
+
+        for epoch in range(num_epochs):
+
+            if show_progressbar:
+                print("Epoch {0} of {1}".format(epoch, num_epochs))
+
+            idx, nb_step, lr_step = self._epoch(X,
+                                                nb_update_counter,
+                                                lr_update_counter,
+                                                idx, nb_step,
+                                                lr_step,
+                                                show_progressbar,
+                                                context_mask)
+
         self.trained = True
 
         logger.info("Total train time: {0}".format(time.time() - start))
@@ -107,6 +126,9 @@ class Som(Base_Som):
         :param batch_size: The desired batch size.
         :return: A batched version of your data.
         """
+
+        self.progressbar_interval = 1
+        self.progressbar_mult = batch_size
 
         return np.resize(X, (int(np.ceil(X.shape[0] / batch_size)), batch_size, X.shape[1]))
 

@@ -1,6 +1,7 @@
 import logging
 import time
 import numpy as np
+import json
 
 from somber.utils import progressbar, expo, linear, static
 from functools import reduce
@@ -9,7 +10,6 @@ from sklearn.decomposition.pca import PCA
 
 
 logger = logging.getLogger(__name__)
-
 
 class Som(object):
     """
@@ -56,7 +56,7 @@ class Som(object):
         # Weights are initialized to small random values.
         # Initializing to more appropriate values given the dataset
         # will probably give faster convergence.
-        self.weights = np.zeros((self.map_dim, dim))
+        self.weights = np.zeros((self.map_dim, dim), dtype=np.float32)
         self.data_dim = dim
 
         # The function used to diminish the learning rate.
@@ -68,6 +68,42 @@ class Som(object):
         self.distance_grid = self._initialize_distance_grid()
         self.min_max = min_max
         self.trained = False
+
+        self.progressbar_interval = 10
+        self.progressbar_mult = 1
+
+    @classmethod
+    def load(cls, path):
+
+        data = json.load(open(path))
+
+        weights = data['weights']
+        weights = np.array(weights, dtype=np.float32)
+        datadim = weights.shape[1]
+
+        dimensions = data['dimensions']
+        lrfunc = expo if data['lrfunc'] == 'expo' else linear
+        nbfunc = expo if data['nbfunc'] == 'expo' else linear
+        lr = data['lr']
+        sigma = data['sigma']
+
+        s = cls(dimensions, datadim, lr, lrfunc=lrfunc, nbfunc=nbfunc, sigma=sigma)
+        s.weights = weights
+        s.trained = True
+
+        return s
+
+    def save(self, path):
+
+        dicto = {}
+        dicto['weights'] = [[float(w) for w in x] for x in self.weights]
+        dicto['dimensions'] = self.map_dimensions
+        dicto['lrfunc'] = 'expo' if self.lrfunc == expo else 'linear'
+        dicto['nbfunc'] = 'expo' if self.nbfunc == expo else 'linear'
+        dicto['lr'] = self.learning_rate
+        dicto['sigma'] = self.sigma
+
+        json.dump(dicto, open(path, 'w'))
 
     def train(self, X, num_epochs, total_updates=1000, stop_lr_updates=1.0, stop_nb_updates=1.0, context_mask=(), show_progressbar=False):
         """
@@ -116,77 +152,58 @@ class Som(object):
         start = time.time()
 
         # Train
-        self._train_loop(X, num_epochs, lr_update_counter, nb_update_counter, context_mask, show_progressbar)
-        self.trained = True
-
-        logger.info("Total train time: {0}".format(time.time() - start))
-
-    def _init_pca(self, X):
-
-        coordinates = []
-        coordinates.append(np.arange(self.map_dim) // self.map_dimensions[1])
-        coordinates.append(np.arange(self.map_dim) % self.map_dimensions[1])
-        coordinates = np.array(coordinates).T
-
-        data = (X - np.mean(X, axis=0))
-        tmp_matrix = np.tile(np.mean(X, axis=0), (self.map_dim, 1))
-
-        pca = PCA(n_components=2, svd_solver='randomized')
-        pca.fit(data)
-        components = (pca.components_.T / np.sqrt(np.sum(np.square(pca.components_), axis=1)))
-        components *= pca.explained_variance_
-        components = components.T
-
-        for j in range(self.map_dim):
-            tmp_matrix[j] += coordinates[j, :] * components
-
-        return tmp_matrix
-
-    def _train_loop(self, X, num_epochs, lr_update_counter, nb_update_counter, context_mask, show_progressbar):
-        """
-        The train loop. Is a separate function to accomodate easy inheritance.
-
-        :param X: The input data.
-        :param lr_update_counter: A list of indices at which the params need to be updated.
-        :param context_mask: Not used in the standard SOM.
-        :return: None
-        """
-
         nb_step = 0
         lr_step = 0
 
         # Calculate the influences for update 0.
-        map_radius = self.nbfunc(self.sigma, 0, len(nb_update_counter))
-        learning_rate = self.lrfunc(self.learning_rate, 0, len(lr_update_counter))
-        influences = self._calculate_influence(map_radius) * learning_rate
-        update = False
 
         idx = 0
 
         for epoch in range(num_epochs):
 
-            for x in progressbar(X, use=show_progressbar):
+            idx, nb_step, lr_step = self._epoch(X,
+                                                nb_update_counter,
+                                                lr_update_counter,
+                                                idx,
+                                                nb_step,
+                                                lr_step,
+                                                show_progressbar,
+                                                context_mask)
 
-                self._example(x, influences)
+        self.trained = True
+        logger.info("Total train time: {0}".format(time.time() - start))
 
-                if idx in nb_update_counter:
-                    nb_step += 1
+    def _epoch(self, X, nb_update_counter, lr_update_counter, idx, nb_step, lr_step, show_progressbar, context_mask):
 
-                    map_radius = self.nbfunc(self.sigma, nb_step, len(nb_update_counter))
-                    update = True
+        map_radius = self.nbfunc(self.sigma, nb_step, len(nb_update_counter))
+        learning_rate = self.lrfunc(self.learning_rate, lr_step, len(lr_update_counter))
+        influences = self._calculate_influence(map_radius) * learning_rate
 
-                if idx in lr_update_counter:
-                    lr_step += 1
+        update = False
 
-                    learning_rate = self.lrfunc(self.learning_rate, lr_step, len(lr_update_counter))
-                    update = True
+        for x in progressbar(X, use=show_progressbar, mult=self.progressbar_mult, idx_interval=self.progressbar_interval):
 
-                if update:
+            self._example(x, influences)
 
-                    influences = self._calculate_influence(map_radius) * learning_rate
-                    update = False
+            if idx in nb_update_counter:
+                nb_step += 1
 
-                idx += 1
+                map_radius = self.nbfunc(self.sigma, nb_step, len(nb_update_counter))
+                update = True
+
+            if idx in lr_update_counter:
+                lr_step += 1
+
+                learning_rate = self.lrfunc(self.learning_rate, lr_step, len(lr_update_counter))
+                update = True
+
+            if update:
+                influences = self._calculate_influence(map_radius) * learning_rate
+                update = False
+
+            idx += 1
+
+        return idx, nb_step, lr_step
 
     def _example(self, x, influences, **kwargs):
         """

@@ -1,9 +1,10 @@
 import numpy as np
 import time
 import logging
+import json
 
 from somber.som import Som
-from somber.utils import expo, progressbar
+from somber.utils import expo, progressbar, linear
 from collections import Counter
 
 
@@ -21,57 +22,100 @@ class Merging(Som):
         self.context_weights = np.ones(self.weights.shape)
         self.entropy = 0
 
-    def _train_loop(self, X, num_epochs, lr_update_counter, nb_update_counter, context_mask, show_progressbar):
+    @classmethod
+    def load(cls, path):
 
-        # Don't use asserts, these can be disabled
-        if X.shape[-1] != self.data_dim:
-            raise ValueError("Data dim does not match dimensionality of the data")
+        data = json.load(open(path))
 
-        nb_step = 0
-        lr_step = 0
+        weights = data['weights']
+        weights = np.array(weights, dtype=np.float32)
 
-        # Calculate the influences for update 0.
-        map_radius = self.nbfunc(self.sigma, 0, len(nb_update_counter))
-        learning_rate = self.lrfunc(self.learning_rate, 0, len(lr_update_counter))
+        datadim = weights.shape[1]
+        dimensions = data['dimensions']
+
+        lrfunc = expo if data['lrfunc'] == 'expo' else linear
+        nbfunc = expo if data['nbfunc'] == 'expo' else linear
+        lr = data['lr']
+        sigma = data['sigma']
+
+        try:
+            context_weights = data['context_weights']
+            context_weights = np.array(context_weights, dtype=np.float32)
+        except KeyError:
+            context_weights = np.ones(weights.shape)
+
+        try:
+            alpha = data['alpha']
+            beta = data['beta']
+            entropy = data['entropy']
+        except KeyError:
+            alpha = 0.0
+            beta = 0.5
+            entropy = 0.0
+
+        s = cls(dimensions, datadim, lr, lrfunc=lrfunc, nbfunc=nbfunc, sigma=sigma, alpha=alpha, beta=beta)
+        s.entropy = entropy
+        s.weights = weights
+        s.context_weights = context_weights
+        s.trained = True
+
+        return s
+
+    def save(self, path):
+
+        dicto = {}
+        dicto['weights'] = [[float(w) for w in x] for x in self.weights]
+        dicto['context_weights'] = [[float(w) for w in x] for x in self.context_weights]
+        dicto['dimensions'] = self.map_dimensions
+        dicto['lrfunc'] = 'expo' if self.lrfunc == expo else 'linear'
+        dicto['nbfunc'] = 'expo' if self.nbfunc == expo else 'linear'
+        dicto['lr'] = self.learning_rate
+        dicto['sigma'] = self.sigma
+        dicto['alpha'] = self.alpha
+        dicto['beta'] = self.beta
+        dicto['entropy'] = self.entropy
+
+        json.dump(dicto, open(path, 'w'))
+
+    def _epoch(self, X, nb_update_counter, lr_update_counter, idx, nb_step, lr_step, show_progressbar, context_mask):
+
+        map_radius = self.nbfunc(self.sigma, nb_step, len(nb_update_counter))
+        learning_rate = self.lrfunc(self.learning_rate, lr_step, len(lr_update_counter))
         influences = self._calculate_influence(map_radius) * learning_rate
-        update = False
-        print(nb_update_counter)
-        print(lr_update_counter)
 
-        bmu = None
-
+        bmu = 0
         bmus = []
-        prev_update = 0
+        prev_update = 0.0
 
-        idx = 0
+        update = False
 
-        for epoch in progressbar(range(num_epochs), use=show_progressbar):
+        for x in X:
 
-            for x in X:
+            bmu = self._example(x, influences, prev_bmu=bmu)
+            bmus.append(bmu)
 
-                bmu = self._example(x, influences, prev_bmu=bmu)
-                bmus.append(bmu)
+            if idx in nb_update_counter:
+                nb_step += 1
 
-                if idx in nb_update_counter:
-                    nb_step += 1
+                map_radius = self.nbfunc(self.sigma, nb_step, len(nb_update_counter))
+                logger.info("Updated map radius: {0}".format(map_radius))
+                update = True
 
-                    map_radius = self.nbfunc(self.sigma, nb_step, len(nb_update_counter))
-                    logger.info("Updated map radius: {0}".format(map_radius))
-                    update = True
+            if idx in lr_update_counter:
+                lr_step += 1
 
-                if idx in lr_update_counter:
-                    lr_step += 1
+                learning_rate = self.lrfunc(self.learning_rate, lr_step, len(lr_update_counter))
+                logger.info("Updated learning rate: {0}".format(learning_rate))
+                update = True
 
-                    learning_rate = self.lrfunc(self.learning_rate, lr_step, len(lr_update_counter))
-                    logger.info("Updated learning rate: {0}".format(learning_rate))
-                    update = True
+            if update:
+                influences = self._calculate_influence(map_radius) * learning_rate
+                prev_update = self._entropy(Counter(bmus), prev_update)
+                update = False
 
-                if update:
-                    influences = self._calculate_influence(map_radius) * learning_rate
-                    prev_update = self._entropy(Counter(bmus), prev_update)
-                    update = False
+            idx += 1
 
-                idx += 1
+        return idx, nb_step, lr_step
 
     def _example(self, x, influences, **kwargs):
         """
