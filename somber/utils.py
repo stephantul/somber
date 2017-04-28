@@ -41,7 +41,7 @@ def linear(value, current_step, total_steps):
     return (value * (total_steps - current_step) / total_steps) + 0.01
 
 
-def progressbar(target, width=30, interval=0.01, idx_interval=10, use=True, mult=1):
+def progressbar(target, width=30, interval=0.2, idx_interval=10, use=True, mult=1):
     """
     Progressbar, partially borrowed from Keras:
     https://github.com/fchollet/keras/blob/088dbe6866fd51f4e0e64866e442968c17abfa10/keras/utils/generic_utils.py

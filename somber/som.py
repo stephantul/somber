@@ -375,7 +375,7 @@ class Som(object):
 
         for node in list(self.weights):
 
-            differences = self._distance_difference(node, X_unique)
+            differences = node - X_unique
             distances = np.sum(np.square(differences), axis=1)
             node_match.append(names[np.argmin(distances)])
 
