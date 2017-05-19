@@ -13,71 +13,47 @@ logger = logging.getLogger(__name__)
 
 class Merging(Som):
 
-    def __init__(self, map_dim, dim, learning_rate, alpha, beta, sigma=None, lrfunc=expo, nbfunc=expo):
+    def __init__(self, map_dim, weight_dim, learning_rate, alpha, beta, sigma=None, lrfunc=expo, nbfunc=expo):
+        """
+        A merging som
 
-        super().__init__(map_dim, dim, learning_rate, lrfunc, nbfunc, sigma=sigma)
+        :param map_dim: A tuple of map dimensions, e.g. (10, 10) instantiates a 10 by 10 map.
+        :param weight_dim: The data dimensionality.
+        :param learning_rate: The learning rate, which is decreases according to some function
+        :param lrfunc: The function to use in decreasing the learning rate. The functions are
+        defined in utils. Default is exponential.
+        :param nbfunc: The function to use in decreasing the neighborhood size. The functions
+        are defined in utils. Default is exponential.
+        :param alpha: Controls the rate of context dependence, where 0 is low context dependence,
+        and 1 is high context dependence. Should start at low values (e.g. 0.0 to 0.05)
+        :param beta: A float between 1 and 0 specifying the influence of context on previous weights.
+        Static, usually 0.5.
+        :param sigma: The starting value for the neighborhood size, which is decreased over time.
+        If sigma is None (default), sigma is calculated as ((max(map_dim) / 2) + 0.01), which is
+        generally a good value.
+        """
+
+        super().__init__(map_dim, weight_dim, learning_rate, lrfunc, nbfunc, sigma=sigma)
 
         self.alpha = alpha
         self.beta = beta
         self.context_weights = np.ones(self.weights.shape)
         self.entropy = 0
 
-    @classmethod
-    def load(cls, path):
-
-        data = json.load(open(path))
-
-        weights = data['weights']
-        weights = np.array(weights, dtype=np.float32)
-
-        datadim = weights.shape[1]
-        dimensions = data['dimensions']
-
-        lrfunc = expo if data['lrfunc'] == 'expo' else linear
-        nbfunc = expo if data['nbfunc'] == 'expo' else linear
-        lr = data['lr']
-        sigma = data['sigma']
-
-        try:
-            context_weights = data['context_weights']
-            context_weights = np.array(context_weights, dtype=np.float32)
-        except KeyError:
-            context_weights = np.ones(weights.shape)
-
-        try:
-            alpha = data['alpha']
-            beta = data['beta']
-            entropy = data['entropy']
-        except KeyError:
-            alpha = 0.0
-            beta = 0.5
-            entropy = 0.0
-
-        s = cls(dimensions, datadim, lr, lrfunc=lrfunc, nbfunc=nbfunc, sigma=sigma, alpha=alpha, beta=beta)
-        s.entropy = entropy
-        s.weights = weights
-        s.context_weights = context_weights
-        s.trained = True
-
-        return s
-
-    def save(self, path):
-
-        dicto = {}
-        dicto['weights'] = [[float(w) for w in x] for x in self.weights]
-        dicto['context_weights'] = [[float(w) for w in x] for x in self.context_weights]
-        dicto['dimensions'] = self.map_dimensions
-        dicto['lrfunc'] = 'expo' if self.lrfunc == expo else 'linear'
-        dicto['nbfunc'] = 'expo' if self.nbfunc == expo else 'linear'
-        dicto['lr'] = self.learning_rate
-        dicto['sigma'] = self.sigma
-        dicto['alpha'] = self.alpha
-        dicto['beta'] = self.beta
-        dicto['entropy'] = self.entropy
-
-        json.dump(dicto, open(path, 'w'))
-
     def _epoch(self, X, nb_update_counter, lr_update_counter, idx, nb_step, lr_step, show_progressbar, context_mask):
+        """
+        A single epoch.
+
+        :param X: The training data.
+        :param nb_update_counter: The epochs at which to update the neighborhood.
+        :param lr_update_counter: The epochs at which to updat the learning rate.
+        :param idx: The current index.
+        :param nb_step: The current neighborhood step.
+        :param lr_step: The current learning rate step.
+        :param show_progressbar: Whether to show a progress bar or not.
+        :param context_mask: The context mask.
+        :return:
+        """
 
         map_radius = self.nbfunc(self.sigma, nb_step, len(nb_update_counter))
         learning_rate = self.lrfunc(self.learning_rate, lr_step, len(lr_update_counter))
@@ -119,12 +95,13 @@ class Merging(Som):
 
     def _example(self, x, influences, **kwargs):
         """
-        A single epoch.
+        A single example.
+
         :param X: a numpy array of data
         :param map_radius: The radius at the current epoch, given the learning rate and map size
         :param learning_rates: The learning rate.
         :param batch_size: The batch size
-        :return: The best matching unit
+        :return: The activation
         """
 
         prev_bmu = kwargs['prev_bmu']
@@ -227,3 +204,73 @@ class Merging(Som):
             activations.append(activation)
 
         return activations
+
+    @classmethod
+    def load(cls, path):
+        """
+        Loads a SOM from a JSON file.
+
+        A normal SOM can be loaded via this method. Any attributes not present
+        in the loaded JSON will be initialized to sane values.
+
+        :param path: The path to the JSON file.
+        :return: A trained mergeSom.
+        """
+
+        data = json.load(open(path))
+
+        weights = data['weights']
+        weights = np.array(weights, dtype=np.float32)
+
+        datadim = weights.shape[1]
+        dimensions = data['dimensions']
+
+        lrfunc = expo if data['lrfunc'] == 'expo' else linear
+        nbfunc = expo if data['nbfunc'] == 'expo' else linear
+        lr = data['lr']
+        sigma = data['sigma']
+
+        try:
+            context_weights = data['context_weights']
+            context_weights = np.array(context_weights, dtype=np.float32)
+        except KeyError:
+            context_weights = np.ones(weights.shape)
+
+        try:
+            alpha = data['alpha']
+            beta = data['beta']
+            entropy = data['entropy']
+        except KeyError:
+            alpha = 0.0
+            beta = 0.5
+            entropy = 0.0
+
+        s = cls(dimensions, datadim, lr, lrfunc=lrfunc, nbfunc=nbfunc, sigma=sigma, alpha=alpha, beta=beta)
+        s.entropy = entropy
+        s.weights = weights
+        s.context_weights = context_weights
+        s.trained = True
+
+        return s
+
+    def save(self, path):
+        """
+        Saves the merging SOM to a JSON file.
+
+        :param path: The path to which to save the JSON file.
+        :return: None
+        """
+
+        to_save = {}
+        to_save['weights'] = [[float(w) for w in x] for x in self.weights]
+        to_save['context_weights'] = [[float(w) for w in x] for x in self.context_weights]
+        to_save['dimensions'] = self.map_dimensions
+        to_save['lrfunc'] = 'expo' if self.lrfunc == expo else 'linear'
+        to_save['nbfunc'] = 'expo' if self.nbfunc == expo else 'linear'
+        to_save['lr'] = self.learning_rate
+        to_save['sigma'] = self.sigma
+        to_save['alpha'] = self.alpha
+        to_save['beta'] = self.beta
+        to_save['entropy'] = self.entropy
+
+        json.dump(to_save, open(path, 'w'))

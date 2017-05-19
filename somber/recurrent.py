@@ -11,14 +11,47 @@ logger = logging.getLogger(__name__)
 
 class Recurrent(Som):
 
-    def __init__(self, map_dim, dim, learning_rate, alpha, sigma=None, lrfunc=expo, nbfunc=expo):
+    def __init__(self, map_dim, weight_dim, learning_rate, alpha, sigma=None, lrfunc=expo, nbfunc=expo):
+        """
+        A recurrent SOM
 
-        super().__init__(map_dim, dim, learning_rate, lrfunc, nbfunc, sigma)
+        The recurrent SOM attempts to model sequences by integrating the current weight vector
+        with the activation in the previous time-step. Weights thus become shared between current
+        and previous activation.
+
+        :param map_dim: A tuple of map dimensions, e.g. (10, 10) instantiates a 10 by 10 map.
+        :param weight_dim: The data dimensionality.
+        :param learning_rate: The learning rate, which is decreases according to some function
+        :param lrfunc: The function to use in decreasing the learning rate. The functions are
+        defined in utils. Default is exponential.
+        :param nbfunc: The function to use in decreasing the neighborhood size. The functions
+        are defined in utils. Default is exponential.
+        :param alpha: a float between 0 and 1, specifying how much weight the previous activation
+        receives in comparison to the current activation
+        :param sigma: The starting value for the neighborhood size, which is decreased over time.
+        If sigma is None (default), sigma is calculated as ((max(map_dim) / 2) + 0.01), which is
+        generally a good value.
+        """
+
+        super().__init__(map_dim, weight_dim, learning_rate, lrfunc, nbfunc, sigma)
         self.alpha = alpha
 
     def _epoch(self, X, nb_update_counter, lr_update_counter, idx, nb_step, lr_step, show_progressbar, context_mask):
+        """
+        A single epoch.
 
-        prev_activation = np.zeros((self.map_dim,))
+        :param X: The training data.
+        :param nb_update_counter: The epochs at which to update the neighborhood.
+        :param lr_update_counter: The epochs at which to updat the learning rate.
+        :param idx: The current index.
+        :param nb_step: The current neighborhood step.
+        :param lr_step: The current learning rate step.
+        :param show_progressbar: Whether to show a progress bar or not.
+        :param context_mask: The context mask.
+        :return:
+        """
+
+        prev_activation = np.zeros((self.weight_dim,))
 
         # Calculate the influences for update 0.
         map_radius = self.nbfunc(self.sigma, nb_step, len(nb_update_counter))
@@ -68,9 +101,6 @@ class Recurrent(Som):
         activation, difference = self._get_bmus(x, prev_activation=prev_activation)
 
         influence, bmu = self._apply_influences(activation, influences)
-
-        # Minibatch update of X and Y. Returns arrays of updates,
-        # one for each example.
         self.weights += self._calculate_update(difference, influence)
 
         return difference
@@ -106,7 +136,7 @@ class Recurrent(Som):
         # Return the indices of the BMU which matches the input data most
         distances = []
 
-        prev_activation = np.zeros((self.map_dim, self.data_dim))
+        prev_activation = np.zeros((self.weight_dim, self.data_dim))
 
         for x in X:
             distance, prev_activation = self._get_bmus(x, prev_activation=prev_activation)

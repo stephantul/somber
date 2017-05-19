@@ -5,11 +5,10 @@ import json
 
 from somber.utils import progressbar, expo, linear, static
 from functools import reduce
-from collections import defaultdict, Counter, OrderedDict
-from sklearn.decomposition.pca import PCA
-
+from collections import defaultdict, Counter
 
 logger = logging.getLogger(__name__)
+
 
 class Som(object):
     """
@@ -18,7 +17,7 @@ class Som(object):
 
     def __init__(self,
                  map_dim,
-                 dim,
+                 weight_dim,
                  learning_rate,
                  lrfunc=expo,
                  nbfunc=expo,
@@ -27,7 +26,7 @@ class Som(object):
         """
 
         :param map_dim: A tuple of map dimensions, e.g. (10, 10) instantiates a 10 by 10 map.
-        :param dim: The data dimensionality.
+        :param weight_dim: The data dimensionality.
         :param learning_rate: The learning rate, which is decreases according to some function
         :param lrfunc: The function to use in decreasing the learning rate. The functions are
         defined in utils. Default is exponential.
@@ -51,13 +50,13 @@ class Som(object):
 
         # The dimensionality of the weight vector
         # Usually (width * height)
-        self.map_dim = reduce(np.multiply, map_dim, 1)
+        self.weight_dim = reduce(np.multiply, map_dim, 1)
 
         # Weights are initialized to small random values.
         # Initializing to more appropriate values given the dataset
         # will probably give faster convergence.
-        self.weights = np.zeros((self.map_dim, dim), dtype=np.float32)
-        self.data_dim = dim
+        self.weights = np.zeros((self.weight_dim, weight_dim), dtype=np.float32)
+        self.data_dim = weight_dim
 
         # The function used to diminish the learning rate.
         self.lrfunc = lrfunc
@@ -71,39 +70,6 @@ class Som(object):
 
         self.progressbar_interval = 10
         self.progressbar_mult = 1
-
-    @classmethod
-    def load(cls, path):
-
-        data = json.load(open(path))
-
-        weights = data['weights']
-        weights = np.array(weights, dtype=np.float32)
-        datadim = weights.shape[1]
-
-        dimensions = data['dimensions']
-        lrfunc = expo if data['lrfunc'] == 'expo' else linear
-        nbfunc = expo if data['nbfunc'] == 'expo' else linear
-        lr = data['lr']
-        sigma = data['sigma']
-
-        s = cls(dimensions, datadim, lr, lrfunc=lrfunc, nbfunc=nbfunc, sigma=sigma)
-        s.weights = weights
-        s.trained = True
-
-        return s
-
-    def save(self, path):
-
-        dicto = {}
-        dicto['weights'] = [[float(w) for w in x] for x in self.weights]
-        dicto['dimensions'] = self.map_dimensions
-        dicto['lrfunc'] = 'expo' if self.lrfunc == expo else 'linear'
-        dicto['nbfunc'] = 'expo' if self.nbfunc == expo else 'linear'
-        dicto['lr'] = self.learning_rate
-        dicto['sigma'] = self.sigma
-
-        json.dump(dicto, open(path, 'w'))
 
     def train(self, X, num_epochs, total_updates=1000, stop_lr_updates=1.0, stop_nb_updates=1.0, context_mask=(), show_progressbar=False):
         """
@@ -127,7 +93,7 @@ class Som(object):
 
         if not self.trained:
             min_ = np.min(X, axis=0)
-            random = np.random.rand(self.map_dim).reshape((self.map_dim, 1))
+            random = np.random.rand(self.weight_dim).reshape((self.weight_dim, 1))
             temp = np.outer(random, np.abs(np.max(X, axis=0) - min_))
             self.weights = min_ + temp
 
@@ -174,6 +140,19 @@ class Som(object):
         logger.info("Total train time: {0}".format(time.time() - start))
 
     def _epoch(self, X, nb_update_counter, lr_update_counter, idx, nb_step, lr_step, show_progressbar, context_mask):
+        """
+        A single epoch.
+
+        :param X: The training data.
+        :param nb_update_counter: The epochs at which to update the neighborhood.
+        :param lr_update_counter: The epochs at which to updat the learning rate.
+        :param idx: The current index.
+        :param nb_step: The current neighborhood step.
+        :param lr_step: The current learning rate step.
+        :param show_progressbar: Whether to show a progress bar or not.
+        :param context_mask: The context mask.
+        :return:
+        """
 
         map_radius = self.nbfunc(self.sigma, nb_step, len(nb_update_counter))
         learning_rate = self.lrfunc(self.learning_rate, lr_step, len(lr_update_counter))
@@ -211,7 +190,7 @@ class Som(object):
 
         :param x: a single example
         :param influences: an array with influence values.
-        :return: The best matching unit
+        :return: The activation
         """
 
         activation, difference_x = self._get_bmus(x)
@@ -407,7 +386,7 @@ class Som(object):
         :return: The neighborhood, reshaped into an array
         """
 
-        neighborhood = np.exp(-self.distance_grid / (2.0 * sigma ** 2)).reshape(self.map_dim, self.map_dim)
+        neighborhood = np.exp(-self.distance_grid / (2.0 * sigma ** 2)).reshape(self.weight_dim, self.weight_dim)
         return np.asarray([neighborhood] * self.data_dim).transpose((1, 2, 0))
 
     def _initialize_distance_grid(self):
@@ -417,7 +396,7 @@ class Som(object):
         :return:
         """
 
-        return np.array([self._grid_distance(i).reshape(1, self.map_dim) for i in range(self.map_dim)])
+        return np.array([self._grid_distance(i).reshape(1, self.weight_dim) for i in range(self.weight_dim)])
 
     def _grid_distance(self, index):
         """
@@ -449,3 +428,48 @@ class Som(object):
         width, height = self.map_dimensions
 
         return self.weights.reshape((width, height, self.data_dim)).transpose(1, 0, 2)
+
+    @classmethod
+    def load(cls, path):
+        """
+        Loads a SOM from a JSON file.
+
+        :param path: The path to the JSON file.
+        :return: A SOM.
+        """
+
+        data = json.load(open(path))
+
+        weights = data['weights']
+        weights = np.array(weights, dtype=np.float32)
+        datadim = weights.shape[1]
+
+        dimensions = data['dimensions']
+        lrfunc = expo if data['lrfunc'] == 'expo' else linear
+        nbfunc = expo if data['nbfunc'] == 'expo' else linear
+        lr = data['lr']
+        sigma = data['sigma']
+
+        s = cls(dimensions, datadim, lr, lrfunc=lrfunc, nbfunc=nbfunc, sigma=sigma)
+        s.weights = weights
+        s.trained = True
+
+        return s
+
+    def save(self, path):
+        """
+        Saves a SOM to a JSON file.
+
+        :param path: The path to the JSON file that will be created
+        :return: None
+        """
+
+        to_save = {}
+        to_save['weights'] = [[float(w) for w in x] for x in self.weights]
+        to_save['dimensions'] = self.map_dimensions
+        to_save['lrfunc'] = 'expo' if self.lrfunc == expo else 'linear'
+        to_save['nbfunc'] = 'expo' if self.nbfunc == expo else 'linear'
+        to_save['lr'] = self.learning_rate
+        to_save['sigma'] = self.sigma
+
+        json.dump(to_save, open(path, 'w'))

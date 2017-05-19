@@ -11,21 +11,20 @@ logger = logging.getLogger(__name__)
 
 class Som(Base_Som):
     """
-    This is the basic SOM class.
+    This is the batched version of the basic SOM class.
     """
 
     def __init__(self,
                  map_dim,
-                 dim,
+                 weight_dim,
                  learning_rate,
                  lrfunc=expo,
                  nbfunc=expo,
                  sigma=None,
                  min_max=np.argmin):
         """
-
         :param map_dim: A tuple of map dimensions, e.g. (10, 10) instantiates a 10 by 10 map.
-        :param dim: The data dimensionality.
+        :param weight_dim: The data dimensionality.
         :param learning_rate: The learning rate, which is decreases according to some function
         :param lrfunc: The function to use in decreasing the learning rate. The functions are
         defined in utils. Default is exponential.
@@ -37,7 +36,7 @@ class Som(Base_Som):
         """
 
         super().__init__(map_dim=map_dim,
-                         dim=dim,
+                         weight_dim=weight_dim,
                          learning_rate=learning_rate,
                          lrfunc=lrfunc,
                          nbfunc=nbfunc,
@@ -53,20 +52,25 @@ class Som(Base_Som):
         In general, 1000 updates will do for most learning problems.
 
         :param X: the data on which to train.
+        :param num_epochs: the number of epochs for which to train.
         :param total_updates: The number of updates to the parameters to do during training.
         :param stop_lr_updates: A fraction, describing over which portion of the training data
-        the neighborhood and learning rate should decrease. If the total number of updates, for example
+        the learning rate should decrease. If the total number of updates, for example
         is 1000, and stop_updates = 0.5, 1000 updates will have occurred after half of the examples.
         After this period, no updates of the parameters will occur.
+        :param stop_nb_updates: A fraction, describing over which portion of the training data
+        the neighborhood should decrease.
         :param context_mask: a binary mask used to indicate whether the context should be set to 0
         at that specified point in time. Used to make items conditionally independent on previous items.
         Examples: Spaces in character-based models of language. Periods and question marks in models of sentences.
+        :param batch_size: the batch size
+        :param show_progressbar: whether to show the progress bar.
         :return: None
         """
 
         if not self.trained:
             min_ = np.min(X, axis=0)
-            random = np.random.rand(self.map_dim).reshape((self.map_dim, 1))
+            random = np.random.rand(self.weight_dim).reshape((self.weight_dim, 1))
             temp = np.outer(random, np.abs(np.max(X, axis=0) - min_))
             self.weights = min_ + temp
 
@@ -136,9 +140,10 @@ class Som(Base_Som):
         """
         A single example.
 
-        :param x: a single example
-        :param influences: an array with influence values.
-        :return: The best matching unit
+        :param X: a numpy array of data
+        :param map_radius: The radius at the current epoch, given the learning rate and map size
+        :param learning_rates: The learning rate.
+        :return: The activation
         """
 
         # activation, difference_x = self._get_bmus(x)
