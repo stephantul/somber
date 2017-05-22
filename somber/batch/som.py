@@ -36,7 +36,7 @@ class Som(Base_Som):
         """
 
         super().__init__(map_dim=map_dim,
-                         weight_dim=weight_dim,
+                         data_dim=weight_dim,
                          learning_rate=learning_rate,
                          lrfunc=lrfunc,
                          nbfunc=nbfunc,
@@ -73,6 +73,8 @@ class Som(Base_Som):
             random = np.random.rand(self.weight_dim).reshape((self.weight_dim, 1))
             temp = np.outer(random, np.abs(np.max(X, axis=0) - min_))
             self.weights = min_ + temp
+
+        print(self.weights)
 
         # The train length
         train_length = (len(X) * num_epochs) // batch_size
@@ -146,13 +148,12 @@ class Som(Base_Som):
         :return: The activation
         """
 
-        # activation, difference_x = self._get_bmus(x)
         activation, difference_x = self._get_bmus(x)
 
         influences, bmu = self._apply_influences(activation, influences)
         self.weights += self._calculate_update(difference_x, influences).mean(axis=0)
 
-        return bmu
+        return activation
 
     def _get_bmus(self, x):
         """
@@ -165,11 +166,19 @@ class Som(Base_Som):
         """
 
         diff = self._distance_difference(x, self.weights)
-        euclidean = self._euclidean(x, self.weights)
+        distance = self.batch_distance(x, self.weights)
 
-        return euclidean, diff
+        return distance, diff
 
-    def _euclidean(self, x, weights):
+    def batch_distance(self, x, weights):
+        """
+        batched version of the euclidean distance.
+
+        :param x: The input
+        :param weights: The weights
+        :return: A matrix containing the distance between each
+        weight and each input.
+        """
 
         m_norm = np.square(x).sum(axis=1)
         w_norm = np.square(weights).sum(axis=1)[:, np.newaxis]

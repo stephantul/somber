@@ -17,7 +17,7 @@ class Som(object):
 
     def __init__(self,
                  map_dim,
-                 weight_dim,
+                 data_dim,
                  learning_rate,
                  lrfunc=expo,
                  nbfunc=expo,
@@ -26,7 +26,7 @@ class Som(object):
         """
 
         :param map_dim: A tuple of map dimensions, e.g. (10, 10) instantiates a 10 by 10 map.
-        :param weight_dim: The data dimensionality.
+        :param data_dim: The data dimensionality.
         :param learning_rate: The learning rate, which is decreases according to some function
         :param lrfunc: The function to use in decreasing the learning rate. The functions are
         defined in utils. Default is exponential.
@@ -55,8 +55,8 @@ class Som(object):
         # Weights are initialized to small random values.
         # Initializing to more appropriate values given the dataset
         # will probably give faster convergence.
-        self.weights = np.zeros((self.weight_dim, weight_dim), dtype=np.float32)
-        self.data_dim = weight_dim
+        self.weights = np.zeros((self.weight_dim, data_dim), dtype=np.float32)
+        self.data_dim = data_dim
 
         # The function used to diminish the learning rate.
         self.lrfunc = lrfunc

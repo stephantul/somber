@@ -13,12 +13,12 @@ logger = logging.getLogger(__name__)
 
 class Merging(Som):
 
-    def __init__(self, map_dim, weight_dim, learning_rate, alpha, beta, sigma=None, lrfunc=expo, nbfunc=expo):
+    def __init__(self, map_dim, data_dim, learning_rate, alpha, beta, sigma=None, lrfunc=expo, nbfunc=expo):
         """
         A merging som
 
         :param map_dim: A tuple of map dimensions, e.g. (10, 10) instantiates a 10 by 10 map.
-        :param weight_dim: The data dimensionality.
+        :param data_dim: The data dimensionality.
         :param learning_rate: The learning rate, which is decreases according to some function
         :param lrfunc: The function to use in decreasing the learning rate. The functions are
         defined in utils. Default is exponential.
@@ -33,7 +33,7 @@ class Merging(Som):
         generally a good value.
         """
 
-        super().__init__(map_dim, weight_dim, learning_rate, lrfunc, nbfunc, sigma=sigma)
+        super().__init__(map_dim, data_dim, learning_rate, lrfunc, nbfunc, sigma=sigma)
 
         self.alpha = alpha
         self.beta = beta

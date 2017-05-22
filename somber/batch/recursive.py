@@ -153,8 +153,8 @@ class Recursive(Som):
         # Distances are squared euclidean norm of differences.
         # Since euclidean norm is sqrt(sum(square(x)))) we can leave out the sqrt
         # and avoid doing an extra square.
-        distance_x = self._euclidean(x, self.weights)
-        distance_y = self._euclidean(prev_activation, self.context_weights)
+        distance_x = self.batch_distance(x, self.weights)
+        distance_y = self.batch_distance(prev_activation, self.context_weights)
 
         activation = np.exp(-(self.alpha * distance_x + self.beta * distance_y))
 
