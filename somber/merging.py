@@ -3,7 +3,7 @@ import time
 import logging
 import json
 
-from somber.som import Som
+from somber.som import Som, euclidean
 from somber.utils import expo, progressbar, linear
 from collections import Counter
 
@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 
 class Merging(Som):
 
-    def __init__(self, map_dim, data_dim, learning_rate, alpha, beta, sigma=None, lrfunc=expo, nbfunc=expo):
+    def __init__(self, map_dim, data_dim, learning_rate, alpha, beta, sigma=None, lrfunc=expo, nbfunc=expo, min_max=np.argmin, distance_function=euclidean):
         """
         A merging som
 
@@ -33,7 +33,7 @@ class Merging(Som):
         generally a good value.
         """
 
-        super().__init__(map_dim, data_dim, learning_rate, lrfunc, nbfunc, sigma=sigma)
+        super().__init__(map_dim, data_dim, learning_rate, lrfunc, nbfunc, sigma, min_max, distance_function)
 
         self.alpha = alpha
         self.beta = beta
@@ -87,6 +87,8 @@ class Merging(Som):
             if update:
                 influences = self._calculate_influence(map_radius) * learning_rate
                 prev_update = self._entropy(Counter(bmus), prev_update)
+                # self.alpha += prev_update
+                logging.info("ALPHA: {0}".format(self.alpha))
                 update = False
 
             idx += 1
@@ -116,8 +118,6 @@ class Merging(Som):
 
         influence, bmu = self._apply_influences(activation, influences)
 
-        # Minibatch update of X and Y. Returns arrays of updates,
-        # one for each example.
         self.weights += self._calculate_update(diff_x, influence)
         self.context_weights += self._calculate_update(diff_context, influence)
 

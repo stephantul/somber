@@ -2,7 +2,7 @@ import numpy as np
 import logging
 import time
 
-from somber.som import Som
+from somber.som import Som, euclidean, cosine
 from somber.utils import expo, progressbar
 
 
@@ -11,7 +11,7 @@ logger = logging.getLogger(__name__)
 
 class Recurrent(Som):
 
-    def __init__(self, map_dim, data_dim, learning_rate, alpha, sigma=None, lrfunc=expo, nbfunc=expo):
+    def __init__(self, map_dim, data_dim, learning_rate, alpha, sigma=None, lrfunc=expo, nbfunc=expo, min_max=np.argmin, distance_function=euclidean):
         """
         A recurrent SOM
 
@@ -33,7 +33,7 @@ class Recurrent(Som):
         generally a good value.
         """
 
-        super().__init__(map_dim, data_dim, learning_rate, lrfunc, nbfunc, sigma)
+        super().__init__(map_dim, data_dim, learning_rate, lrfunc, nbfunc, sigma, min_max, distance_function)
         self.alpha = alpha
 
     def _epoch(self, X, nb_update_counter, lr_update_counter, idx, nb_step, lr_step, show_progressbar, context_mask):

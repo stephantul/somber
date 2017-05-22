@@ -3,7 +3,7 @@ import logging
 import time
 import json
 
-from somber.som import Som
+from somber.som import Som, cosine, euclidean
 from somber.utils import expo, progressbar, linear
 
 
@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 
 class Recursive(Som):
 
-    def __init__(self, map_dim, data_dim, learning_rate, alpha, beta, sigma=None, lrfunc=expo, nbfunc=expo):
+    def __init__(self, map_dim, data_dim, learning_rate, alpha, beta, sigma=None, lrfunc=expo, nbfunc=expo, distance_function=euclidean):
         """
         A recursive SOM.
 
@@ -34,7 +34,7 @@ class Recursive(Som):
         generally a good value.
         """
 
-        super().__init__(map_dim, data_dim, learning_rate, lrfunc, nbfunc, sigma, min_max=np.argmax)
+        super().__init__(map_dim, data_dim, learning_rate, lrfunc, nbfunc, sigma, np.argmax, distance_function)
         self.context_weights = np.zeros((self.weight_dim, self.weight_dim), dtype=np.float32)
         self.alpha = alpha
         self.beta = beta
@@ -144,8 +144,8 @@ class Recursive(Som):
         # Distances are squared euclidean norm of differences.
         # Since euclidean norm is sqrt(sum(square(x)))) we can leave out the sqrt
         # and avoid doing an extra square.
-        distance_x = np.sum(np.square(difference_x), axis=1)
-        distance_y = np.sum(np.square(difference_y), axis=1)
+        distance_x = self.distance_function(x, self.weights)
+        distance_y = self.distance_function(prev_activation, self.context_weights)
 
         activation = np.exp(-(self.alpha * distance_x) - (self.beta * distance_y))
 
@@ -221,7 +221,6 @@ class Recursive(Som):
             context_weights = np.array(context_weights, dtype=np.float32)
         except KeyError:
             context_weights = np.zeros((len(weights), len(weights)))
-
 
         try:
             alpha = data['alpha']

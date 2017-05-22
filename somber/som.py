@@ -10,6 +10,17 @@ from collections import defaultdict, Counter
 logger = logging.getLogger(__name__)
 
 
+def euclidean(x, weights):
+
+    return np.sum(np.square(x - weights), axis=1)
+
+
+def cosine(x, weights):
+
+    x_norm = np.nan_to_num(np.square(x / np.linalg.norm(x)))
+    return np.dot(x_norm, weights.T)
+
+
 class Som(object):
     """
     This is the basic SOM class.
@@ -22,7 +33,8 @@ class Som(object):
                  lrfunc=expo,
                  nbfunc=expo,
                  sigma=None,
-                 min_max=np.argmin):
+                 min_max=np.argmin,
+                 distance_function=euclidean):
         """
 
         :param map_dim: A tuple of map dimensions, e.g. (10, 10) instantiates a 10 by 10 map.
@@ -47,6 +59,8 @@ class Som(object):
         # A tuple of dimensions
         # Usually (width, height), but can accomodate one-dimensional maps.
         self.map_dimensions = map_dim
+
+        self.distance_function = distance_function
 
         # The dimensionality of the weight vector
         # Usually (width * height)
@@ -228,9 +242,7 @@ class Som(object):
         """
 
         differences = self._distance_difference(x, self.weights)
-
-        # squared euclidean distance.
-        activations = np.sum(np.square(differences), axis=1)
+        activations = self.distance_function(x, self.weights)
         return activations, differences
 
     def _distance_difference(self, x, weights):
@@ -315,10 +327,10 @@ class Som(object):
 
         for k, v in receptive_fields.items():
 
-            v = [x for x in v if x]
+            v = [x for x in v if np.any(x)]
 
             total = len(v)
-            v = ["".join([str(x_) for x_ in x]) for x in v]
+            v = ["".join([str(x_) for x_ in np.squeeze(x)]) for x in v]
 
             for row in reversed(list(zip(*v))):
 
@@ -330,8 +342,7 @@ class Som(object):
                     else:
                         break
 
-        return ({k: v[::-1] for k, v in sequence.items()},
-                {k: Counter(["".join(x) for x in v]) for k, v in receptive_fields.items()})
+        return {k: v[::-1] for k, v in sequence.items()}
 
     def invert_projection(self, X, identities):
         """

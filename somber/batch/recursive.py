@@ -2,7 +2,7 @@ import numpy as np
 import logging
 import json
 
-from somber.batch.som import Som
+from somber.batch.som import Som, cosine_batch
 from somber.utils import expo, progressbar, linear
 
 

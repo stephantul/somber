@@ -9,6 +9,51 @@ from somber.som import Som as Base_Som
 logger = logging.getLogger(__name__)
 
 
+def cosine_batch(x, weights):
+    """
+    batched version of the euclidean distance.
+
+    :param x: The input
+    :param weights: The weights
+    :return: A matrix containing the distance between each
+    weight and each input.
+    """
+
+    norm = np.sqrt(np.sum(np.square(x), axis=1))
+    nonzero = norm > 0
+    norm_vectors = np.zeros_like(x)
+    norm_vectors[nonzero] = x[nonzero] / norm[nonzero, np.newaxis]
+
+    w_norm = np.sqrt(np.sum(np.square(weights), axis=1))
+    nonzero = w_norm > 0
+    w_norm_vectors = np.zeros_like(weights)
+    w_norm_vectors[nonzero] = weights[nonzero] / w_norm[nonzero, np.newaxis]
+
+    res = np.dot(norm_vectors, w_norm_vectors.T)
+    return res
+
+
+def batch_distance(x, weights):
+    """
+    batched version of the euclidean distance.
+
+    :param x: The input
+    :param weights: The weights
+    :return: A matrix containing the distance between each
+    weight and each input.
+    """
+
+    m_norm = np.square(x).sum(axis=1)
+    w_norm = np.square(weights).sum(axis=1)[:, np.newaxis]
+    dotted = np.dot(np.multiply(x, 2), weights.T)
+
+    res = np.outer(m_norm, np.ones((1, w_norm.shape[0])))
+    res += np.outer(np.ones((m_norm.shape[0], 1)), w_norm.T)
+    res -= dotted
+
+    return res
+
+
 class Som(Base_Som):
     """
     This is the batched version of the basic SOM class.
@@ -21,7 +66,8 @@ class Som(Base_Som):
                  lrfunc=expo,
                  nbfunc=expo,
                  sigma=None,
-                 min_max=np.argmin):
+                 min_max=np.argmin,
+                 distance_function=batch_distance):
         """
         :param map_dim: A tuple of map dimensions, e.g. (10, 10) instantiates a 10 by 10 map.
         :param weight_dim: The data dimensionality.
@@ -41,7 +87,8 @@ class Som(Base_Som):
                          lrfunc=lrfunc,
                          nbfunc=nbfunc,
                          sigma=sigma,
-                         min_max=min_max)
+                         min_max=min_max,
+                         distance_function=distance_function)
 
     def train(self, X, num_epochs=10, total_updates=10, stop_lr_updates=1.0, stop_nb_updates=1.0, context_mask=(), batch_size=100, show_progressbar=False):
         """
@@ -154,41 +201,6 @@ class Som(Base_Som):
         self.weights += self._calculate_update(difference_x, influences).mean(axis=0)
 
         return activation
-
-    def _get_bmus(self, x):
-        """
-        Gets the best matching units, based on euclidean distance.
-
-        :param x: The input vector
-        :return: The activations, which is a vector of map_dim, and
-         the distances between the input and the weights, which can be
-         reused in the update calculation.
-        """
-
-        diff = self._distance_difference(x, self.weights)
-        distance = self.batch_distance(x, self.weights)
-
-        return distance, diff
-
-    def batch_distance(self, x, weights):
-        """
-        batched version of the euclidean distance.
-
-        :param x: The input
-        :param weights: The weights
-        :return: A matrix containing the distance between each
-        weight and each input.
-        """
-
-        m_norm = np.square(x).sum(axis=1)
-        w_norm = np.square(weights).sum(axis=1)[:, np.newaxis]
-        dotted = np.dot(np.multiply(x, 2), weights.T)
-
-        res = np.outer(m_norm, np.ones((1, w_norm.shape[0])))
-        res += np.outer(np.ones((m_norm.shape[0], 1)), w_norm.T)
-        res -= dotted
-
-        return res
 
     def _distance_difference(self, x, weights):
         """
