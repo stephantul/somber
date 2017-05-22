@@ -90,7 +90,7 @@ class Som(Base_Som):
                          min_max=min_max,
                          distance_function=distance_function)
 
-    def train(self, X, num_epochs=10, total_updates=10, stop_lr_updates=1.0, stop_nb_updates=1.0, context_mask=(), batch_size=100, show_progressbar=False):
+    def train(self, X, num_epochs=10, total_updates=1000, stop_lr_updates=1.0, stop_nb_updates=1.0, context_mask=(), batch_size=100, show_progressbar=False):
         """
         Fits the SOM to some data.
         The updates correspond to the number of updates to the parameters

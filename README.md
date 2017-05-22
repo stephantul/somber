@@ -64,7 +64,7 @@ color_names = \
 s = Som((10, 10), dim=3, learning_rate=0.3)
 
 # train
-s.train(X, num_epochs=100, total_updates=100, stop_updates=0.5)
+s.train(X, num_epochs=100, total_updates=1000)
 
 # predict: get the index of each best matching unit.
 predictions = s.predict(X)
