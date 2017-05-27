@@ -2,6 +2,7 @@ import logging
 import time
 import numpy as np
 import json
+import torch as t
 
 from somber.utils import progressbar, expo, linear, static
 from functools import reduce
@@ -12,7 +13,7 @@ logger = logging.getLogger(__name__)
 
 def euclidean(x, weights):
 
-    return np.sum(np.square(x - weights), axis=1)
+    return t.sum(t.pow(x - weights, 2), dim=1)
 
 
 def cosine(x, weights):
@@ -33,7 +34,7 @@ class Som(object):
                  lrfunc=expo,
                  nbfunc=expo,
                  sigma=None,
-                 min_max=np.argmin,
+                 min_max=t.min,
                  distance_function=euclidean):
         """
 
@@ -64,12 +65,12 @@ class Som(object):
 
         # The dimensionality of the weight vector
         # Usually (width * height)
-        self.weight_dim = reduce(np.multiply, map_dim, 1)
+        self.weight_dim = int(reduce(np.multiply, map_dim, 1))
 
         # Weights are initialized to small random values.
         # Initializing to more appropriate values given the dataset
         # will probably give faster convergence.
-        self.weights = np.zeros((self.weight_dim, data_dim), dtype=np.float32)
+        self.weights = t.zeros(self.weight_dim, data_dim)
         self.data_dim = data_dim
 
         # The function used to diminish the learning rate.
@@ -109,12 +110,14 @@ class Som(object):
             min_ = np.min(X, axis=0)
             random = np.random.rand(self.weight_dim).reshape((self.weight_dim, 1))
             temp = np.outer(random, np.abs(np.max(X, axis=0) - min_))
-            self.weights = min_ + temp
+            self.weights = t.Tensor(min_ + temp)
 
         if not np.any(context_mask):
             context_mask = np.ones((len(X), 1))
 
         train_length = len(X) * num_epochs
+        X = t.FloatTensor(X)
+        X = t.stack([X] * self.weights.size()[0]).transpose(1, 0)
 
         # The step size is the number of items between rough epochs.
         # We use len instead of shape because len also works with np.flatiter
@@ -210,7 +213,8 @@ class Som(object):
         activation, difference_x = self._get_bmus(x)
 
         influences, bmu = self._apply_influences(activation, influences)
-        self.weights += self._calculate_update(difference_x, influences)
+        upd = self._calculate_update(difference_x, influences)
+        t.add(self.weights, upd, out=self.weights)
 
         return activation
 
@@ -253,7 +257,6 @@ class Som(object):
         :param weights: An array of weights.
         :return: A vector of differences.
         """
-
         return x - weights
 
     def _predict_base(self, X):
@@ -265,13 +268,15 @@ class Som(object):
         each node has to each input.
         """
 
+        X = t.Tensor(X)
+
         distances = []
 
         for x in X:
             distance, _ = self._get_bmus(x)
             distances.append(distance)
 
-        return distances
+        return t.stack(distances)
 
     def quant_error(self, X):
         """
@@ -284,7 +289,7 @@ class Som(object):
         """
 
         dist = self._predict_base(X)
-        return np.min(dist, axis=1)
+        return self.min_max(dist, 1)[0]
 
     def predict(self, X):
         """
@@ -295,7 +300,7 @@ class Som(object):
         """
 
         dist = self._predict_base(X)
-        return self.min_max(dist, axis=1)
+        return self.min_max(dist, 1)
 
     def receptive_field(self, X, identities, max_len=5, threshold=0.9):
         """
@@ -366,7 +371,7 @@ class Som(object):
         for node in list(self.weights):
 
             differences = node - X_unique
-            distances = np.sum(np.square(differences), axis=1)
+            distances = t.sum(t.pow(differences, 2), 1)
             node_match.append(names[np.argmin(distances)])
 
         return np.array(node_match)
@@ -382,7 +387,7 @@ class Som(object):
         :return: The influence given the bmu, and the index of the bmu itself.
         """
 
-        bmu = self.min_max(activations)
+        bmu = self.min_max(activations, 0)[1][0]
         return influences[bmu], bmu
 
     def _calculate_influence(self, sigma):
@@ -397,8 +402,8 @@ class Som(object):
         :return: The neighborhood, reshaped into an array
         """
 
-        neighborhood = np.exp(-self.distance_grid / (2.0 * sigma ** 2)).reshape(self.weight_dim, self.weight_dim)
-        return np.asarray([neighborhood] * self.data_dim).transpose((1, 2, 0))
+        neighborhood = t.exp(-self.distance_grid / (2.0 * sigma ** 2)).view(self.weight_dim, self.weight_dim)
+        return t.stack([neighborhood] * self.data_dim).transpose(0,2).transpose(0,1)
 
     def _initialize_distance_grid(self):
         """
@@ -407,7 +412,8 @@ class Som(object):
         :return:
         """
 
-        return np.array([self._grid_distance(i).reshape(1, self.weight_dim) for i in range(self.weight_dim)])
+        p = [self._grid_distance(i).view(1, self.weight_dim) for i in range(self.weight_dim)]
+        return t.stack(p)
 
     def _grid_distance(self, index):
         """
@@ -423,11 +429,12 @@ class Som(object):
         row = index // width
         column = index % width
 
-        r = np.arange(height)[:, np.newaxis]
-        c = np.arange(width)
-        distance = (r-row)**2 + (c-column)**2
+        x = t.abs(t.arange(0, 100).view(10, 10) % 10 - row)
+        y = t.abs(t.arange(0, 100).view(10, 10) % 10 - column).transpose(1, 0)
 
-        return distance.ravel()
+        distance = x + y
+
+        return distance.view(distance.numel())
 
     def map_weights(self):
         """

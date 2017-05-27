@@ -121,8 +121,6 @@ class Som(Base_Som):
             temp = np.outer(random, np.abs(np.max(X, axis=0) - min_))
             self.weights = min_ + temp
 
-        print(self.weights)
-
         # The train length
         train_length = (len(X) * num_epochs) // batch_size
 
