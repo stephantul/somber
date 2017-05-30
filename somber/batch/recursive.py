@@ -1,8 +1,9 @@
 import numpy as np
 import logging
 import json
+import torch as t
 
-from somber.batch.som import Som, cosine_batch
+from somber.batch.som import Som
 from somber.utils import expo, progressbar, linear
 
 
@@ -11,7 +12,7 @@ logger = logging.getLogger(__name__)
 
 class Recursive(Som):
 
-    def __init__(self, map_dim, weight_dim, learning_rate, alpha, beta, sigma=None, lrfunc=expo, nbfunc=expo):
+    def __init__(self, map_dim, data_dim, learning_rate, alpha, beta, sigma=None, lrfunc=expo, nbfunc=expo):
         """
         A recursive SOM.
 
@@ -20,7 +21,7 @@ class Recursive(Som):
         "remember" short sequences, which makes it attractive for simple sequence problems, e.g. characters or words.
 
         :param map_dim: A tuple of map dimensions, e.g. (10, 10) instantiates a 10 by 10 map.
-        :param weight_dim: The data dimensionality.
+        :param data_dim: The data dimensionality.
         :param learning_rate: The learning rate, which is decreases according to some function
         :param lrfunc: The function to use in decreasing the learning rate. The functions are
         defined in utils. Default is exponential.
@@ -33,8 +34,8 @@ class Recursive(Som):
         generally a good value.
         """
 
-        super().__init__(map_dim, weight_dim, learning_rate, lrfunc, nbfunc, sigma, min_max=np.argmax)
-        self.context_weights = np.zeros((self.map_dim, self.map_dim))
+        super().__init__(map_dim, data_dim, learning_rate, lrfunc, nbfunc, sigma, min_max=t.max)
+        self.context_weights = t.zeros((self.weight_dim, self.weight_dim))
         self.alpha = alpha
         self.beta = beta
 
@@ -57,7 +58,7 @@ class Recursive(Som):
         :return:
         """
 
-        prev_activation = np.zeros((X.shape[1], self.map_dim))
+        prev_activation = t.zeros((X.size()[1], self.weight_dim))
 
         # Calculate the influences for update 0.
         map_radius = self.nbfunc(self.sigma, nb_step, len(nb_update_counter))
@@ -68,8 +69,7 @@ class Recursive(Som):
         for x, ct in progressbar(zip(X, context_mask), use=show_progressbar):
 
             prev_activation = self._example(x, influences, prev_activation=prev_activation)
-
-            prev_activation *= ct
+            # prev_activation *= ct
 
             if idx in nb_update_counter:
                 nb_step += 1
@@ -109,11 +109,10 @@ class Recursive(Som):
         activation, diff_x, diff_context = self._get_bmus(x, prev_activation=prev_activation)
 
         influence, bmu = self._apply_influences(activation, influences)
-
         # Update
-        self.weights += self._calculate_update(diff_x, influence).mean(axis=0)
-        # print(influence.shape)
-        self.context_weights += self._calculate_update(diff_context, influence).mean(axis=0)
+        self.weights += t.mean(self._calculate_update(diff_x, influence[:, :, :self.data_dim]), 0)
+        res = t.squeeze(t.mean(self._calculate_update(diff_context, influence), 0))
+        self.context_weights += res
 
         return activation
 
@@ -145,7 +144,6 @@ class Recursive(Som):
         """
 
         prev_activation = kwargs['prev_activation']
-
         # Differences is the components of the weights subtracted from the weight vector.
         difference_x = self._distance_difference(x, self.weights)
         difference_y = self._distance_difference(prev_activation, self.context_weights)
@@ -153,10 +151,11 @@ class Recursive(Som):
         # Distances are squared euclidean norm of differences.
         # Since euclidean norm is sqrt(sum(square(x)))) we can leave out the sqrt
         # and avoid doing an extra square.
-        distance_x = self.batch_distance(x, self.weights)
-        distance_y = self.batch_distance(prev_activation, self.context_weights)
 
-        activation = np.exp(-(self.alpha * distance_x + self.beta * distance_y))
+        distance_x = self.distance_function(x, self.weights)
+        distance_y = self.distance_function(prev_activation, self.context_weights)
+
+        activation = t.exp(-(t.mul(distance_x, self.alpha) + t.mul(distance_y, self.beta)))
 
         return activation, difference_x, difference_y
 
@@ -170,18 +169,21 @@ class Recursive(Som):
         """
 
         X = self._create_batches(X, 1)
+        X = t.from_numpy(np.asarray(X, dtype=np.float32))
+        print(X.size())
 
-        # Return the indices of the BMU which matches the input data most
         distances = []
 
-        prev_activation = np.sum(np.square(self._distance_difference(X[0], self.weights)), axis=2)
+        prev_activation = np.squeeze(t.sum(t.pow(self._distance_difference(X[0], self.weights), 2), 2))[None, :]
         distances.extend(prev_activation)
+
+        print(prev_activation.size())
 
         for x in X[1:]:
             prev_activation, _, _ = self._get_bmus(x, prev_activation=prev_activation)
             distances.extend(prev_activation)
 
-        return np.array(distances)
+        return t.stack(distances)
 
     @classmethod
     def load(cls, path):
@@ -197,7 +199,7 @@ class Recursive(Som):
         data = json.load(open(path))
 
         weights = data['weights']
-        weights = np.array(weights, dtype=np.float32)
+        weights = t.from_numpy(np.asarray(weights, dtype=np.float32))
         datadim = weights.shape[1]
 
         dimensions = data['dimensions']
@@ -208,9 +210,9 @@ class Recursive(Som):
 
         try:
             context_weights = data['context_weights']
-            context_weights = np.array(context_weights, dtype=np.float32)
+            context_weights = t.from_numpy(np.asarray(context_weights, dtype=np.float32))
         except KeyError:
-            context_weights = np.zeros((len(weights), len(weights)))
+            context_weights = t.zeros((len(weights), len(weights)))
 
         try:
             alpha = data['alpha']
@@ -246,3 +248,18 @@ class Recursive(Som):
         dicto['beta'] = self.beta
 
         json.dump(dicto, open(path, 'w'))
+
+    def _calculate_influence(self, sigma):
+        """
+        Pre-calculates the influence for a given value of sigma.
+
+        The neighborhood has size map_dim * map_dim, so for a 30 * 30 map, the neighborhood will be
+        size (900, 900). It is then duplicated _data_dim times, and reshaped into an
+        (map_dim, map_dim, data_dim) array. This is done to facilitate fast calculation in subsequent steps.
+
+        :param sigma: The neighborhood value.
+        :return: The neighborhood, reshaped into an array
+        """
+
+        neighborhood = t.exp(-self.distance_grid / (2.0 * sigma ** 2)).view(self.weight_dim, self.weight_dim)
+        return t.stack([neighborhood] * self.weight_dim).transpose(0,2).transpose(0,1)

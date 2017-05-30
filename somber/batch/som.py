@@ -1,36 +1,13 @@
 import logging
 import time
 import numpy as np
+import torch as t
 
 from somber.utils import progressbar, expo, linear, static
 from somber.som import Som as Base_Som
 
 
 logger = logging.getLogger(__name__)
-
-
-def cosine_batch(x, weights):
-    """
-    batched version of the euclidean distance.
-
-    :param x: The input
-    :param weights: The weights
-    :return: A matrix containing the distance between each
-    weight and each input.
-    """
-
-    norm = np.sqrt(np.sum(np.square(x), axis=1))
-    nonzero = norm > 0
-    norm_vectors = np.zeros_like(x)
-    norm_vectors[nonzero] = x[nonzero] / norm[nonzero, np.newaxis]
-
-    w_norm = np.sqrt(np.sum(np.square(weights), axis=1))
-    nonzero = w_norm > 0
-    w_norm_vectors = np.zeros_like(weights)
-    w_norm_vectors[nonzero] = weights[nonzero] / w_norm[nonzero, np.newaxis]
-
-    res = np.dot(norm_vectors, w_norm_vectors.T)
-    return res
 
 
 def batch_distance(x, weights):
@@ -43,12 +20,12 @@ def batch_distance(x, weights):
     weight and each input.
     """
 
-    m_norm = np.square(x).sum(axis=1)
-    w_norm = np.square(weights).sum(axis=1)[:, np.newaxis]
-    dotted = np.dot(np.multiply(x, 2), weights.T)
+    m_norm = t.sum(t.pow(x, 2), dim=1)
+    w_norm = t.sum(t.pow(weights, 2), dim=1)
+    dotted = t.mm(t.mul(x, 2), weights.t())
 
-    res = np.outer(m_norm, np.ones((1, w_norm.shape[0])))
-    res += np.outer(np.ones((m_norm.shape[0], 1)), w_norm.T)
+    res = t.mm(m_norm, t.ones((1, w_norm.size()[0])))
+    res += t.mm(t.ones((m_norm.size()[0], 1)), w_norm.t())
     res -= dotted
 
     return res
@@ -61,16 +38,16 @@ class Som(Base_Som):
 
     def __init__(self,
                  map_dim,
-                 weight_dim,
+                 data_dim,
                  learning_rate,
                  lrfunc=expo,
                  nbfunc=expo,
                  sigma=None,
-                 min_max=np.argmin,
+                 min_max=t.min,
                  distance_function=batch_distance):
         """
         :param map_dim: A tuple of map dimensions, e.g. (10, 10) instantiates a 10 by 10 map.
-        :param weight_dim: The data dimensionality.
+        :param data_dim: The data dimensionality.
         :param learning_rate: The learning rate, which is decreases according to some function
         :param lrfunc: The function to use in decreasing the learning rate. The functions are
         defined in utils. Default is exponential.
@@ -82,7 +59,7 @@ class Som(Base_Som):
         """
 
         super().__init__(map_dim=map_dim,
-                         data_dim=weight_dim,
+                         data_dim=data_dim,
                          learning_rate=learning_rate,
                          lrfunc=lrfunc,
                          nbfunc=nbfunc,
@@ -119,7 +96,10 @@ class Som(Base_Som):
             min_ = np.min(X, axis=0)
             random = np.random.rand(self.weight_dim).reshape((self.weight_dim, 1))
             temp = np.outer(random, np.abs(np.max(X, axis=0) - min_))
-            self.weights = min_ + temp
+            self.weights = t.from_numpy(np.asarray(min_ + temp, dtype=np.float32))
+
+        if not np.any(context_mask):
+            context_mask = np.ones((len(X), 1))
 
         # The train length
         train_length = (len(X) * num_epochs) // batch_size
@@ -128,6 +108,8 @@ class Som(Base_Som):
             context_mask = np.ones((len(X), 1))
 
         X = self._create_batches(X, batch_size)
+        X = t.from_numpy(np.asarray(X, dtype=np.float32))
+
         context_mask = self._create_batches(context_mask, batch_size)
 
         # The step size is the number of items between rough epochs.
@@ -144,9 +126,6 @@ class Som(Base_Som):
         # Train
         nb_step = 0
         lr_step = 0
-
-        # Calculate the influences for update 0.
-
         idx = 0
 
         for epoch in range(num_epochs):
@@ -194,9 +173,8 @@ class Som(Base_Som):
         """
 
         activation, difference_x = self._get_bmus(x)
-
         influences, bmu = self._apply_influences(activation, influences)
-        self.weights += self._calculate_update(difference_x, influences).mean(axis=0)
+        self.weights += self._calculate_update(difference_x, influences).mean(0)
 
         return activation
 
@@ -208,8 +186,8 @@ class Som(Base_Som):
         :param weights: An array of weights.
         :return: A vector of differences.
         """
-
-        return np.array([v - weights for v in x])
+        p = t.ones(1, weights.size()[0])
+        return t.stack([v[:, None].mm(p).t() - weights for v in x])
 
     def _predict_base(self, X):
         """
@@ -221,6 +199,7 @@ class Som(Base_Som):
         """
 
         X = self._create_batches(X, 1)
+        X = t.from_numpy(np.asarray(X, dtype=np.float32))
 
         distances = []
 
@@ -228,7 +207,7 @@ class Som(Base_Som):
             distance, _ = self._get_bmus(x)
             distances.extend(distance)
 
-        return np.array(distances)
+        return t.stack(distances)
 
     def _apply_influences(self, activations, influences):
         """
@@ -241,5 +220,5 @@ class Som(Base_Som):
         :return: The influence given the bmu, and the index of the bmu itself.
         """
 
-        bmu = self.min_max(activations, axis=1)
+        bmu = self.min_max(activations, 1)[1][0]
         return influences[bmu], bmu

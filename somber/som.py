@@ -16,12 +16,6 @@ def euclidean(x, weights):
     return t.sum(t.pow(x - weights, 2), dim=1)
 
 
-def cosine(x, weights):
-
-    x_norm = np.nan_to_num(np.square(x / np.linalg.norm(x)))
-    return np.dot(x_norm, weights.T)
-
-
 class Som(object):
     """
     This is the basic SOM class.
@@ -110,13 +104,13 @@ class Som(object):
             min_ = np.min(X, axis=0)
             random = np.random.rand(self.weight_dim).reshape((self.weight_dim, 1))
             temp = np.outer(random, np.abs(np.max(X, axis=0) - min_))
-            self.weights = t.Tensor(min_ + temp)
+            self.weights = t.from_numpy(min_ + temp)
 
         if not np.any(context_mask):
             context_mask = np.ones((len(X), 1))
 
         train_length = len(X) * num_epochs
-        X = t.FloatTensor(X)
+        X = t.from_numpy(X)
         X = t.stack([X] * self.weights.size()[0]).transpose(1, 0)
 
         # The step size is the number of items between rough epochs.
@@ -232,7 +226,6 @@ class Som(object):
         :param influence: The influence the result has on each unit, depending on distance.
         Already includes the learning rate.
         """
-
         return difference_vector * influence
 
     def _get_bmus(self, x):
@@ -268,7 +261,7 @@ class Som(object):
         each node has to each input.
         """
 
-        X = t.Tensor(X)
+        X = t.from_numpy(np.asarray(X, dtype=np.float32))
 
         distances = []
 
@@ -429,8 +422,8 @@ class Som(object):
         row = index // width
         column = index % width
 
-        x = t.abs(t.arange(0, 100).view(10, 10) % 10 - row)
-        y = t.abs(t.arange(0, 100).view(10, 10) % 10 - column).transpose(1, 0)
+        x = t.abs(t.arange(0, self.weight_dim).view(self.map_dimensions) % width - row)
+        y = t.abs(t.arange(0, self.weight_dim).view(self.map_dimensions) % height - column).transpose(1, 0)
 
         distance = x + y
 
@@ -445,7 +438,7 @@ class Som(object):
 
         width, height = self.map_dimensions
 
-        return self.weights.reshape((width, height, self.data_dim)).transpose(1, 0, 2)
+        return self.weights.view((width, height, self.data_dim)).transpose(1, 0)
 
     @classmethod
     def load(cls, path):
@@ -459,7 +452,7 @@ class Som(object):
         data = json.load(open(path))
 
         weights = data['weights']
-        weights = np.array(weights, dtype=np.float32)
+        weights = t.from_numpy(np.asarray(weights, dtype=np.float32))
         datadim = weights.shape[1]
 
         dimensions = data['dimensions']
