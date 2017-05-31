@@ -1,9 +1,10 @@
 import logging
 import time
 import numpy as np
+import torch as t
 import json
 
-from somber.utils import expo, linear, progressbar, np_min
+from somber.utils import expo, linear, progressbar
 from functools import reduce
 from collections import Counter, defaultdict
 
@@ -21,12 +22,12 @@ def euclidean(x, weights):
     weight and each input.
     """
 
-    m_norm = np.sum(np.square(x), axis=1)
-    w_norm = np.sum(np.square(weights), axis=1)
-    dotted = np.dot(np.multiply(x, 2), weights.T)
+    m_norm = t.sum(t.pow(x, 2), dim=1)
+    w_norm = t.sum(t.pow(weights, 2), dim=1)
+    dotted = t.mm(t.mul(x, 2), weights.t())
 
-    res = np.outer(m_norm, np.ones((1, w_norm.shape[0])))
-    res += np.outer(np.ones((m_norm.shape[0], 1)), w_norm.T)
+    res = t.mm(m_norm, t.ones((1, w_norm.size()[0])))
+    res += t.mm(t.ones((m_norm.size()[0], 1)), w_norm.t())
     res -= dotted
 
     return res
@@ -44,7 +45,7 @@ class Som(object):
                  lrfunc=expo,
                  nbfunc=expo,
                  sigma=None,
-                 min_max=np_min,
+                 min_max=t.min,
                  distance_function=euclidean,
                  influence_size=None):
         """
@@ -59,7 +60,7 @@ class Som(object):
         If sigma is None (default), sigma is calculated as ((max(map_dim) / 2) + 0.01), which is
         generally a good value.
         """
-        
+
         if sigma is not None:
             self.sigma = sigma
         else:
@@ -79,7 +80,7 @@ class Som(object):
         # Weights are initialized to small random values.
         # Initializing to more appropriate values given the dataset
         # will probably give faster convergence.
-        self.weights = np.zeros((self.weight_dim, data_dim))
+        self.weights = t.zeros(self.weight_dim, data_dim)
         self.data_dim = data_dim
 
         # The function used to diminish the learning rate.
@@ -125,13 +126,13 @@ class Som(object):
             min_ = np.min(X, axis=0)
             random = np.random.rand(self.weight_dim).reshape((self.weight_dim, 1))
             temp = np.outer(random, np.abs(np.max(X, axis=0) - min_))
-            self.weights = np.asarray(min_ + temp, dtype=np.float32)
+            self.weights = t.from_numpy(np.asarray(min_ + temp, dtype=np.float32))
 
         # The train length
         train_length = (len(X) * num_epochs) // batch_size
 
         X = self._create_batches(X, batch_size)
-        X = np.asarray(X, dtype=np.float32)
+        X = t.from_numpy(np.asarray(X, dtype=np.float32))
 
         # The step size is the number of items between rough epochs.
         # We use len instead of shape because len also works with np.flatiter
@@ -251,7 +252,8 @@ class Som(object):
         :param weights: An array of weights.
         :return: A vector of differences.
         """
-        return np.array([v - weights for v in x])
+        p = t.ones(1, weights.size()[0])
+        return t.stack([v[:, None].mm(p).t() - weights for v in x])
 
     def _predict_base(self, X):
         """
@@ -263,6 +265,7 @@ class Som(object):
         """
 
         X = self._create_batches(X, 1)
+        X = t.from_numpy(np.asarray(X, dtype=np.float32))
 
         distances = []
 
@@ -270,7 +273,7 @@ class Som(object):
             distance, _ = self._get_bmus(x)
             distances.extend(distance)
 
-        return np.array(distances)
+        return t.stack(distances)
 
     def _apply_influences(self, activations, influences):
         """
@@ -283,7 +286,7 @@ class Som(object):
         :return: The influence given the bmu, and the index of the bmu itself.
         """
 
-        bmu = self.min_max(activations, 1)[1]
+        bmu = self.min_max(activations, 1)[1].t()[0]
         return influences[bmu], bmu
 
     def _calculate_influence(self, sigma):
@@ -298,8 +301,8 @@ class Som(object):
         :return: The neighborhood, reshaped into an array
         """
 
-        neighborhood = np.exp(-self.distance_grid / (2.0 * sigma ** 2)).reshape(self.weight_dim, self.weight_dim)
-        return np.array([neighborhood] * self.influence_size).transpose((1, 2, 0))
+        neighborhood = t.exp(-self.distance_grid / (2.0 * sigma ** 2)).view(self.weight_dim, self.weight_dim)
+        return t.stack([neighborhood] * self.influence_size).transpose(0,2).transpose(0,1)
 
     def _initialize_distance_grid(self):
         """
@@ -308,8 +311,8 @@ class Som(object):
         :return:
         """
 
-        p = [self._grid_distance(i).reshape(1, self.weight_dim) for i in range(self.weight_dim)]
-        return np.array(p)
+        p = [self._grid_distance(i).view(1, self.weight_dim) for i in range(self.weight_dim)]
+        return t.stack(p)
 
     def _grid_distance(self, index):
         """
@@ -325,12 +328,12 @@ class Som(object):
         row = index // width
         column = index % width
 
-        x = np.abs(np.arange(0, self.weight_dim).reshape(self.map_dimensions) % width - row)
-        y = np.abs(np.arange(0, self.weight_dim).reshape(self.map_dimensions) % height - column).transpose(1, 0)
+        x = t.abs(t.arange(0, self.weight_dim).view(self.map_dimensions) % width - row)
+        y = t.abs(t.arange(0, self.weight_dim).view(self.map_dimensions) % height - column).transpose(1, 0)
 
         distance = x + y
 
-        return distance.ravel()
+        return distance.view(distance.numel())
 
     def map_weights(self):
         """
@@ -355,7 +358,7 @@ class Som(object):
         data = json.load(open(path))
 
         weights = data['weights']
-        weights = np.asarray(weights, dtype=np.float32)
+        weights = t.from_numpy(np.asarray(weights, dtype=np.float32))
         datadim = weights.shape[1]
 
         dimensions = data['dimensions']
@@ -434,7 +437,7 @@ class Som(object):
         receptive_fields = defaultdict(list)
         predictions = self.predict(X)
 
-        for idx, p in enumerate(np.squeeze(predictions).tolist()):
+        for idx, p in enumerate(t.squeeze(predictions).tolist()):
             receptive_fields[p].append(identities[idx+1 - max_len:idx+1])
 
         sequence = defaultdict(list)

@@ -1,9 +1,10 @@
 import logging
-import time
+import torch as t
 import numpy as np
+import time
 import json
 
-from somber.utils import progressbar, expo, linear, static
+from somber.utils import expo, progressbar, linear
 from functools import reduce
 from collections import defaultdict, Counter
 
@@ -11,19 +12,29 @@ logger = logging.getLogger(__name__)
 
 
 def euclidean(x, weights):
-
-    return np.sum(np.square(x - weights), axis=1)
-
-
-def cosine(x, weights):
-
-    x_norm = np.nan_to_num(np.square(x / np.linalg.norm(x)))
-    return np.dot(x_norm, weights.T)
-
-
-class Som(object):
     """
-    This is the basic SOM class.
+    batched version of the euclidean distance.
+
+    :param x: The input
+    :param weights: The weights
+    :return: A matrix containing the distance between each
+    weight and each input.
+    """
+
+    m_norm = t.sum(t.pow(x, 2), dim=1)
+    w_norm = t.sum(t.pow(weights, 2), dim=1)
+    dotted = t.mm(t.mul(x, 2), weights.t())
+
+    res = t.mm(m_norm, t.ones((1, w_norm.size()[0])))
+    res += t.mm(t.ones((m_norm.size()[0], 1)), w_norm.t())
+    res -= dotted
+
+    return res
+
+
+class MainMixin(object):
+    """
+    This is the batched version of the basic SOM class.
     """
 
     def __init__(self,
@@ -33,10 +44,10 @@ class Som(object):
                  lrfunc=expo,
                  nbfunc=expo,
                  sigma=None,
-                 min_max=np.argmin,
-                 distance_function=euclidean):
+                 min_max=t.min,
+                 distance_function=euclidean,
+                 influence_size=None):
         """
-
         :param map_dim: A tuple of map dimensions, e.g. (10, 10) instantiates a 10 by 10 map.
         :param data_dim: The data dimensionality.
         :param learning_rate: The learning rate, which is decreases according to some function
@@ -55,21 +66,20 @@ class Som(object):
             # Add small constant to sigma to prevent divide by zero for maps of size 2.
             self.sigma = (max(map_dim) / 2.0) + 0.01
 
+        self.distance_function = distance_function
         self.learning_rate = learning_rate
         # A tuple of dimensions
         # Usually (width, height), but can accomodate one-dimensional maps.
         self.map_dimensions = map_dim
 
-        self.distance_function = distance_function
-
         # The dimensionality of the weight vector
         # Usually (width * height)
-        self.weight_dim = reduce(np.multiply, map_dim, 1)
+        self.weight_dim = int(reduce(np.multiply, map_dim, 1))
 
         # Weights are initialized to small random values.
         # Initializing to more appropriate values given the dataset
         # will probably give faster convergence.
-        self.weights = np.zeros((self.weight_dim, data_dim), dtype=np.float32)
+        self.weights = t.zeros(self.weight_dim, data_dim)
         self.data_dim = data_dim
 
         # The function used to diminish the learning rate.
@@ -78,14 +88,18 @@ class Som(object):
         self.nbfunc = nbfunc
 
         # Initialize the distance grid: only needs to be done once.
-        self.distance_grid = self._initialize_distance_grid()
+        # self.distance_grid = self._initialize_distance_grid()
         self.min_max = min_max
         self.trained = False
 
         self.progressbar_interval = 10
         self.progressbar_mult = 1
+        if influence_size is None:
+            self.influence_size = self.data_dim
+        else:
+            self.influence_size = influence_size
 
-    def train(self, X, num_epochs, total_updates=1000, stop_lr_updates=1.0, stop_nb_updates=1.0, context_mask=(), show_progressbar=False):
+    def train(self, X, num_epochs=10, total_updates=1000, stop_lr_updates=1.0, stop_nb_updates=1.0, batch_size=100, show_progressbar=False):
         """
         Fits the SOM to some data.
         The updates correspond to the number of updates to the parameters
@@ -94,14 +108,16 @@ class Som(object):
         In general, 1000 updates will do for most learning problems.
 
         :param X: the data on which to train.
+        :param num_epochs: the number of epochs for which to train.
         :param total_updates: The number of updates to the parameters to do during training.
         :param stop_lr_updates: A fraction, describing over which portion of the training data
-        the neighborhood and learning rate should decrease. If the total number of updates, for example
+        the learning rate should decrease. If the total number of updates, for example
         is 1000, and stop_updates = 0.5, 1000 updates will have occurred after half of the examples.
         After this period, no updates of the parameters will occur.
-        :param context_mask: a binary mask used to indicate whether the context should be set to 0
-        at that specified point in time. Used to make items conditionally independent on previous items.
-        Examples: Spaces in character-based models of language. Periods and question marks in models of sentences.
+        :param stop_nb_updates: A fraction, describing over which portion of the training data
+        the neighborhood should decrease.
+        :param batch_size: the pytorch size
+        :param show_progressbar: whether to show the progress bar.
         :return: None
         """
 
@@ -109,51 +125,47 @@ class Som(object):
             min_ = np.min(X, axis=0)
             random = np.random.rand(self.weight_dim).reshape((self.weight_dim, 1))
             temp = np.outer(random, np.abs(np.max(X, axis=0) - min_))
-            self.weights = min_ + temp
+            self.weights = t.from_numpy(np.asarray(min_ + temp, dtype=np.float32))
 
-        if not np.any(context_mask):
-            context_mask = np.ones((len(X), 1))
+        # The train length
+        train_length = (len(X) * num_epochs) // batch_size
 
-        train_length = len(X) * num_epochs
+        X = self._create_batches(X, batch_size)
+        X = t.from_numpy(np.asarray(X, dtype=np.float32))
 
         # The step size is the number of items between rough epochs.
         # We use len instead of shape because len also works with np.flatiter
         step_size_lr = max((train_length * stop_lr_updates) // total_updates, 1)
         step_size_nb = max((train_length * stop_nb_updates) // total_updates, 1)
 
-        if step_size_lr == 1 or step_size_nb == 1:
-            logger.warning("step size of learning rate or neighborhood is 1")
-
-        logger.info("{0} items, {1} epochs, total length: {2}".format(len(X), num_epochs, train_length))
-
         # Precalculate the number of updates.
         lr_update_counter = np.arange(step_size_lr, (train_length * stop_lr_updates) + step_size_lr, step_size_lr)
         nb_update_counter = np.arange(step_size_nb, (train_length * stop_nb_updates) + step_size_nb, step_size_nb)
+
         start = time.time()
 
         # Train
         nb_step = 0
         lr_step = 0
-
-        # Calculate the influences for update 0.
-
         idx = 0
 
         for epoch in range(num_epochs):
 
+            if show_progressbar:
+                print("Epoch {0} of {1}".format(epoch, num_epochs))
+
             idx, nb_step, lr_step = self._epoch(X,
                                                 nb_update_counter,
                                                 lr_update_counter,
-                                                idx,
-                                                nb_step,
+                                                idx, nb_step,
                                                 lr_step,
-                                                show_progressbar,
-                                                context_mask)
+                                                show_progressbar)
 
         self.trained = True
+
         logger.info("Total train time: {0}".format(time.time() - start))
 
-    def _epoch(self, X, nb_update_counter, lr_update_counter, idx, nb_step, lr_step, show_progressbar, context_mask):
+    def _epoch(self, X, nb_update_counter, lr_update_counter, idx, nb_step, lr_step, show_progressbar):
         """
         A single epoch.
 
@@ -170,7 +182,7 @@ class Som(object):
 
         map_radius = self.nbfunc(self.sigma, nb_step, len(nb_update_counter))
         learning_rate = self.lrfunc(self.learning_rate, lr_step, len(lr_update_counter))
-        influences = self._calculate_influence(map_radius) * learning_rate
+        influences = self._calculate_influence(map_radius, self.influence_size, self.weight_dim) * learning_rate
 
         update = False
 
@@ -191,59 +203,46 @@ class Som(object):
                 update = True
 
             if update:
-                influences = self._calculate_influence(map_radius) * learning_rate
+                influences = self._calculate_influence(map_radius, self.influence_size, self.weight_dim) * learning_rate
                 update = False
 
             idx += 1
 
         return idx, nb_step, lr_step
 
+    def _create_batches(self, X, batch_size):
+        """
+        Creates batches out of a sequential piece of data.
+        Assumes ndim(X) == 2.
+
+        This function will append zeros to the end of your data to make all batches even-sized.
+
+        :param X: A numpy array, representing your input data. Must have 2 dimensions.
+        :param batch_size: The desired pytorch size.
+        :return: A batched version of your data.
+        """
+
+        self.progressbar_interval = 1
+        self.progressbar_mult = batch_size
+
+        return np.resize(X, (int(np.ceil(X.shape[0] / batch_size)), batch_size, X.shape[1]))
+
     def _example(self, x, influences, **kwargs):
         """
         A single example.
 
-        :param x: a single example
-        :param influences: an array with influence values.
+        :param X: a numpy array of data
+        :param map_radius: The radius at the current epoch, given the learning rate and map size
+        :param learning_rates: The learning rate.
         :return: The activation
         """
 
         activation, difference_x = self._get_bmus(x)
-
-        influences, bmu = self._apply_influences(activation, influences)
-        self.weights += self._calculate_update(difference_x, influences)
+        bmu = np.squeeze(t.min(activation, 1)[1])
+        influence = self._apply_influences(bmu, influences)
+        self.weights += self._calculate_update(difference_x, influence).mean(0)
 
         return activation
-
-    def _calculate_update(self, difference_vector, influence):
-        """
-        Updates the nodes, conditioned on the input vector,
-        the influence, as calculated above, and the learning rate.
-
-        Uses Oja's Rule: delta_W = alpha * (X - w)
-
-        In this case (X - w) has been precomputed for speed, in the function
-        _get_bmus.
-
-        :param difference_vector: The difference between the input and some weights.
-        :param influence: The influence the result has on each unit, depending on distance.
-        Already includes the learning rate.
-        """
-
-        return difference_vector * influence
-
-    def _get_bmus(self, x):
-        """
-        Gets the best matching units, based on euclidean distance.
-
-        :param x: The input vector
-        :return: The activations, which is a vector of map_dim, and
-         the distances between the input and the weights, which can be
-         reused in the update calculation.
-        """
-
-        differences = self._distance_difference(x, self.weights)
-        activations = self.distance_function(x, self.weights)
-        return activations, differences
 
     def _distance_difference(self, x, weights):
         """
@@ -253,8 +252,8 @@ class Som(object):
         :param weights: An array of weights.
         :return: A vector of differences.
         """
-
-        return x - weights
+        p = t.ones(1, weights.size()[0])
+        return t.stack([v[:, None].mm(p).t() - weights for v in x])
 
     def _predict_base(self, X):
         """
@@ -265,13 +264,72 @@ class Som(object):
         each node has to each input.
         """
 
+        X = self._create_batches(X, 1)
+        X = t.from_numpy(np.asarray(X, dtype=np.float32))
+
         distances = []
 
         for x in X:
             distance, _ = self._get_bmus(x)
-            distances.append(distance)
+            distances.extend(distance)
 
-        return distances
+        return t.stack(distances)
+
+    def map_weights(self):
+        """
+        Retrieves the grid as a list of lists of weights. For easy visualization.
+
+        :return: A three-dimensional Numpy array of values (width, height, data_dim)
+        """
+
+        width, height = self.map_dimensions
+
+        return np.array(self.weights.view((width, height, self.data_dim)).transpose(1, 0).tolist())
+
+    @classmethod
+    def load(cls, path):
+        """
+        Loads a SOM from a JSON file.
+
+        :param path: The path to the JSON file.
+        :return: A SOM.
+        """
+
+        data = json.load(open(path))
+
+        weights = data['weights']
+        weights = t.from_numpy(np.asarray(weights, dtype=np.float32))
+        datadim = weights.shape[1]
+
+        dimensions = data['dimensions']
+        lrfunc = expo if data['lrfunc'] == 'expo' else linear
+        nbfunc = expo if data['nbfunc'] == 'expo' else linear
+        lr = data['lr']
+        sigma = data['sigma']
+
+        s = cls(dimensions, datadim, lr, lrfunc=lrfunc, nbfunc=nbfunc, sigma=sigma)
+        s.weights = weights
+        s.trained = True
+
+        return s
+
+    def save(self, path):
+        """
+        Saves a SOM to a JSON file.
+
+        :param path: The path to the JSON file that will be created
+        :return: None
+        """
+
+        to_save = {}
+        to_save['weights'] = [[float(w) for w in x] for x in self.weights]
+        to_save['dimensions'] = self.map_dimensions
+        to_save['lrfunc'] = 'expo' if self.lrfunc == expo else 'linear'
+        to_save['nbfunc'] = 'expo' if self.nbfunc == expo else 'linear'
+        to_save['lr'] = self.learning_rate
+        to_save['sigma'] = self.sigma
+
+        json.dump(to_save, open(path, 'w'))
 
     def quant_error(self, X):
         """
@@ -284,7 +342,7 @@ class Som(object):
         """
 
         dist = self._predict_base(X)
-        return np.min(dist, axis=1)
+        return self.min_max(dist, 1)[0]
 
     def predict(self, X):
         """
@@ -295,7 +353,7 @@ class Som(object):
         """
 
         dist = self._predict_base(X)
-        return self.min_max(dist, axis=1)
+        return self.min_max(dist, 1)[1]
 
     def receptive_field(self, X, identities, max_len=5, threshold=0.9):
         """
@@ -319,8 +377,7 @@ class Som(object):
         receptive_fields = defaultdict(list)
         predictions = self.predict(X)
 
-        for idx, p in enumerate(predictions):
-
+        for idx, p in enumerate(t.squeeze(predictions).tolist()):
             receptive_fields[p].append(identities[idx+1 - max_len:idx+1])
 
         sequence = defaultdict(list)
@@ -363,15 +420,57 @@ class Som(object):
         X_unique, names = zip(*set([tuple((tuple(s), n)) for s, n in zip(X, identities)]))
         node_match = []
 
-        for node in list(self.weights):
+        X_unique = np.array(X_unique)
+
+        for node in np.array(self.weights.tolist()):
 
             differences = node - X_unique
-            distances = np.sum(np.square(differences), axis=1)
+            distances = np.sum(np.square(differences), 1)
             node_match.append(names[np.argmin(distances)])
 
         return np.array(node_match)
 
-    def _apply_influences(self, activations, influences):
+    def _get_bmus(self, x):
+        """
+        Gets the best matching units, based on euclidean distance.
+
+        :param x: The input vector
+        :return: The activations, which is a vector of map_dim, and
+         the distances between the input and the weights, which can be
+         reused in the update calculation.
+        """
+
+        differences = self._distance_difference(x, self.weights)
+        activations = self.distance_function(x, self.weights)
+        return activations, differences
+
+    def _calculate_update(self, difference_vector, influence):
+        """
+        Updates the nodes, conditioned on the input vector,
+        the influence, as calculated above, and the learning rate.
+
+        Uses Oja's Rule: delta_W = alpha * (X - w)
+
+        In this case (X - w) has been precomputed for speed, in the function
+        _get_bmus.
+
+        :param difference_vector: The difference between the input and some weights.
+        :param influence: The influence the result has on each unit, depending on distance.
+        Already includes the learning rate.
+        """
+        return difference_vector * influence
+
+
+class MapMixin(object):
+    """
+    This is the basic SOM class.
+    """
+
+    def __init__(self, map_dim, influence_size):
+
+        self.distance_grid = self._initialize_distance_grid(map_dim, influence_size)
+
+    def _apply_influences(self, bmu, influences):
         """
         First calculates the BMU.
         Then gets the appropriate influence from the neighborhood, given the BMU
@@ -381,11 +480,9 @@ class Som(object):
         each node has on each other node.
         :return: The influence given the bmu, and the index of the bmu itself.
         """
+        return influences[bmu]
 
-        bmu = self.min_max(activations)
-        return influences[bmu], bmu
-
-    def _calculate_influence(self, sigma):
+    def _calculate_influence(self, sigma, influence_size, weight_dim):
         """
         Pre-calculates the influence for a given value of sigma.
 
@@ -397,19 +494,20 @@ class Som(object):
         :return: The neighborhood, reshaped into an array
         """
 
-        neighborhood = np.exp(-self.distance_grid / (2.0 * sigma ** 2)).reshape(self.weight_dim, self.weight_dim)
-        return np.asarray([neighborhood] * self.data_dim).transpose((1, 2, 0))
+        neighborhood = t.exp(-self.distance_grid / (2.0 * sigma ** 2)).view(weight_dim, weight_dim)
+        return t.stack([neighborhood] * influence_size).transpose(0,2).transpose(0,1)
 
-    def _initialize_distance_grid(self):
+    def _initialize_distance_grid(self, map_dimensions, weight_dim):
         """
         Initializes the distance grid by calls to _grid_dist.
 
         :return:
         """
 
-        return np.array([self._grid_distance(i).reshape(1, self.weight_dim) for i in range(self.weight_dim)])
+        p = [self._grid_distance(i, map_dimensions, weight_dim).view(1, weight_dim) for i in range(weight_dim)]
+        return t.stack(p)
 
-    def _grid_distance(self, index):
+    def _grid_distance(self, index, map_dimensions, weight_dim):
         """
         Calculates the distance grid for a single index position. This is pre-calculated for
         fast neighborhood calculations later on (see _calc_influence).
@@ -418,69 +516,66 @@ class Som(object):
         :return: A flattened version of the distance array.
         """
 
-        width, height = self.map_dimensions
+        width, height = map_dimensions
 
         row = index // width
         column = index % width
 
-        r = np.arange(height)[:, np.newaxis]
-        c = np.arange(width)
-        distance = (r-row)**2 + (c-column)**2
+        x = t.abs(t.arange(0, weight_dim).view(map_dimensions) % width - row)
+        y = t.abs(t.arange(0, weight_dim).view(map_dimensions) % height - column).transpose(1, 0)
 
-        return distance.ravel()
+        distance = x + y
 
-    def map_weights(self):
-        """
-        Retrieves the grid as a list of lists of weights. For easy visualization.
+        return distance.view(distance.numel())
 
-        :return: A three-dimensional Numpy array of values (width, height, data_dim)
-        """
 
-        width, height = self.map_dimensions
+class Testo(MainMixin, MapMixin):
 
-        return self.weights.reshape((width, height, self.data_dim)).transpose(1, 0, 2)
+    def __init__(self,
+                 map_dim,
+                 data_dim,
+                 learning_rate,
+                 lrfunc=expo,
+                 nbfunc=expo,
+                 sigma=None,
+                 min_max=t.min,
+                 distance_function=euclidean,
+                 influence_size=None):
 
-    @classmethod
-    def load(cls, path):
-        """
-        Loads a SOM from a JSON file.
+        influence_size = data_dim if influence_size is None else influence_size
 
-        :param path: The path to the JSON file.
-        :return: A SOM.
-        """
+        MainMixin.__init__(self, map_dim=map_dim, data_dim=data_dim, learning_rate=learning_rate, lrfunc=lrfunc, nbfunc=nbfunc)
+        MapMixin.__init__(self, map_dim, self.weight_dim)
 
-        data = json.load(open(path))
 
-        weights = data['weights']
-        weights = np.array(weights, dtype=np.float32)
-        datadim = weights.shape[1]
+if __name__ == "__main__":
 
-        dimensions = data['dimensions']
-        lrfunc = expo if data['lrfunc'] == 'expo' else linear
-        nbfunc = expo if data['nbfunc'] == 'expo' else linear
-        lr = data['lr']
-        sigma = data['sigma']
+    tes = Testo(map_dim=(10, 10), data_dim=3, learning_rate=0.3)
 
-        s = cls(dimensions, datadim, lr, lrfunc=lrfunc, nbfunc=nbfunc, sigma=sigma)
-        s.weights = weights
-        s.trained = True
+    X = np.array(
+            [[0., 0., 0.],
+             [0., 0., 1.],
+             [0., 0., 0.5],
+             [0.125, 0.529, 1.0],
+             [0.33, 0.4, 0.67],
+             [0.6, 0.5, 1.0],
+             [0., 1., 0.],
+             [1., 0., 0.],
+             [0., 1., 1.],
+             [1., 0., 1.],
+             [1., 1., 0.],
+             [1., 1., 1.],
+             [.33, .33, .33],
+             [.5, .5, .5],
+             [.66, .66, .66]])
 
-        return s
+    X = np.asarray([X] * 100).reshape(X.shape[0] * 100, 3)
+    print(X.shape)
 
-    def save(self, path):
-        """
-        Saves a SOM to a JSON file.
+    color_names = \
+        ['black', 'blue', 'darkblue', 'skyblue',
+         'greyblue', 'lilac', 'green', 'red',
+         'cyan', 'violet', 'yellow', 'white',
+         'darkgrey', 'mediumgrey', 'lightgrey']
 
-        :param path: The path to the JSON file that will be created
-        :return: None
-        """
-
-        to_save = {}
-        to_save['weights'] = [[float(w) for w in x] for x in self.weights]
-        to_save['dimensions'] = self.map_dimensions
-        to_save['lrfunc'] = 'expo' if self.lrfunc == expo else 'linear'
-        to_save['nbfunc'] = 'expo' if self.nbfunc == expo else 'linear'
-        to_save['lr'] = self.learning_rate
-        to_save['sigma'] = self.sigma
-
-        json.dump(to_save, open(path, 'w'))
+    tes.train(X, 10, batch_size=10)

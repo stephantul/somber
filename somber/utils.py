@@ -2,6 +2,19 @@ import time
 import sys
 import numpy as np
 
+from functools import partial
+
+
+def np_minmax(func1, func2, X, axis=None):
+
+    if axis is None:
+        return func1(X)
+    else:
+        return func1(X, axis), func2(X, axis)
+
+np_min = partial(np_minmax, np.min, np.argmin)
+np_max = partial(np_minmax, np.max, np.argmax)
+
 
 def expo(value, current_step, total_steps):
     """
@@ -142,51 +155,6 @@ def progressbar(target, width=30, interval=0.2, idx_interval=10, use=True, mult=
             bar += ('.' * (width - prog_width))
             bar += ']'
             sys.stdout.write(bar)
-
-
-class MultiPlexer(object):
-    """
-    Multiplies a given array n times.
-    This is useful in simulating epochs.
-
-    """
-
-    def __init__(self, array, times):
-        """
-        Multiplies a given np array n times.
-
-        :param array: The array to multiply.
-        :param times: The number of times to multiply this array.
-        """
-
-        self.array = np.asarray(array)
-        self.times = times
-
-        self.new_shape = list(self.array.shape)
-        self.new_shape[0] *= times
-        self.new_shape = tuple(self.new_shape)
-
-    def __iter__(self):
-
-        for i in range(self.times):
-
-            for item in self.array:
-
-                yield item
-
-    @property
-    def shape(self):
-        return self.new_shape
-
-    def mean(self, axis=None):
-
-        if axis is None:
-            return self.array.mean()
-        return self.array.mean(axis=axis)
-
-    def __len__(self):
-
-        return self.new_shape[0]
 
 
 def reset_context_symbol(X, symbols):
