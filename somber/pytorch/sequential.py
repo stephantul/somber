@@ -3,7 +3,7 @@ import logging
 import json
 import torch as t
 
-from somber.batch.som import Som, euclidean
+from somber.pytorch.som import Som, euclidean
 from somber.utils import expo, progressbar, linear
 from functools import reduce
 
@@ -98,7 +98,7 @@ class Sequential(Som):
         subsequences.
 
         :param X: A numpy array, representing your input data. Must have 2 dimensions.
-        :param batch_size: The desired batch size.
+        :param batch_size: The desired pytorch size.
         :return: A batched version of your data.
         """
 
@@ -169,7 +169,7 @@ class Recurrent(Sequential):
         :param X: a numpy array of data
         :param map_radius: The radius at the current epoch, given the learning rate and map size
         :param learning_rates: The learning rate.
-        :param batch_size: The batch size
+        :param batch_size: The pytorch size
         :return: The best matching unit
         """
 
@@ -273,7 +273,7 @@ class Recursive(Sequential):
         :param X: a numpy array of data
         :param map_radius: The radius at the current epoch, given the learning rate and map size
         :param learning_rates: The learning rate.
-        :param batch_size: The batch size
+        :param batch_size: The pytorch size
         :return: The best matching unit
         """
 
@@ -461,7 +461,7 @@ class Merging(Sequential):
         :param X: a numpy array of data
         :param map_radius: The radius at the current epoch, given the learning rate and map size
         :param learning_rates: The learning rate.
-        :param batch_size: The batch size
+        :param batch_size: The pytorch size
         :return: The activation
         """
         prev_bmu = t.min(kwargs['prev_activation'], 1)[1].t()[0]

@@ -117,7 +117,7 @@ class Som(object):
         After this period, no updates of the parameters will occur.
         :param stop_nb_updates: A fraction, describing over which portion of the training data
         the neighborhood should decrease.
-        :param batch_size: the batch size
+        :param batch_size: the pytorch size
         :param show_progressbar: whether to show the progress bar.
         :return: None
         """
@@ -219,7 +219,7 @@ class Som(object):
         This function will append zeros to the end of your data to make all batches even-sized.
 
         :param X: A numpy array, representing your input data. Must have 2 dimensions.
-        :param batch_size: The desired batch size.
+        :param batch_size: The desired pytorch size.
         :return: A batched version of your data.
         """
 
