@@ -106,6 +106,10 @@ class Sequential(Som):
         # Transposes it to (len(X) / batch_size, batch_size, data_dim)
         return X.transpose((1, 0, 2))
 
+    def _get_bmus(self, x, **kwargs):
+
+        pass
+
     def _predict_base(self, X):
         """
         Predicts distances to some input data.

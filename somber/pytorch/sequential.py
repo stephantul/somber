@@ -107,6 +107,10 @@ class Sequential(Som):
         # Transposes it to (len(X) / batch_size, batch_size, data_dim)
         return X.transpose((1, 0, 2))
 
+    def _get_bmus(self, x, **kwargs):
+
+        pass
+
     def _predict_base(self, X):
         """
         Predicts distances to some input data.
@@ -121,8 +125,6 @@ class Sequential(Som):
 
         distances = []
 
-        # prev_activation = np.squeeze(t.sum(t.pow(self._distance_difference(X[0], self.weights), 2), 2))[None, :]
-        # distances.extend(prev_activation)
         prev_activation = self._init_prev(X)
 
         for x in X:
@@ -519,9 +521,6 @@ class Merging(Sequential):
         # Idem for context.
         differences_y = self._distance_difference(kwargs['prev_activation'], self.context_weights)
 
-        # Distances are squared euclidean norm of differences.
-        # Since euclidean norm is sqrt(sum(square(x)))) we can leave out the sqrt
-        # and avoid doing an extra square.
         distances_x = self.distance_function(x, self.weights)
         distances_y = self.distance_function(kwargs['prev_activation'], self.context_weights)
 
@@ -544,8 +543,6 @@ class Merging(Sequential):
 
         distances = []
 
-        # prev_activation = np.squeeze(t.sum(t.pow(self._distance_difference(X[0], self.weights), 2), 2))[None, :]
-        # distances.extend(prev_activation)
         prev_activation = self._init_prev(X)
 
         for x in X:
