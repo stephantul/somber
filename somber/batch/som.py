@@ -59,7 +59,7 @@ class Som(object):
         If sigma is None (default), sigma is calculated as ((max(map_dim) / 2) + 0.01), which is
         generally a good value.
         """
-
+        
         if sigma is not None:
             self.sigma = sigma
         else:
