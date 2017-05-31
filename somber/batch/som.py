@@ -7,7 +7,6 @@ import json
 from somber.utils import expo, linear, progressbar
 from functools import reduce
 from collections import Counter, defaultdict
-from somber.batch.base import MainMixin, MapMixin
 
 
 logger = logging.getLogger(__name__)
