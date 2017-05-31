@@ -1,10 +1,9 @@
 import numpy as np
 import logging
 import json
-import torch as t
 
-from somber.pytorch.som import Som, euclidean
-from somber.utils import expo, progressbar, linear
+from somber.batch.som import Som, euclidean
+from somber.utils import expo, progressbar, linear, np_min, np_max
 from functools import reduce
 
 
@@ -20,7 +19,7 @@ class Sequential(Som):
                  sigma,
                  lrfunc=expo,
                  nbfunc=expo,
-                 min_max=t.min,
+                 min_max=np_min,
                  distance_function=euclidean,
                  influence_size=None):
 
@@ -36,7 +35,7 @@ class Sequential(Som):
 
     def _init_prev(self, X):
 
-        return t.zeros((X.size()[1], self.weight_dim))
+        return np.zeros((X.shape[1], self.weight_dim))
 
     def _epoch(self, X, nb_update_counter, lr_update_counter, idx, nb_step, lr_step, show_progressbar):
         """
@@ -116,25 +115,23 @@ class Sequential(Som):
         each node has to each input.
         """
 
-        X = self._create_batches(X, 1)
-        X = t.from_numpy(np.asarray(X, dtype=np.float32))
+        X = self._create_batches(X, len(X))
+        X = np.asarray(X, dtype=np.float32)
 
         distances = []
 
-        # prev_activation = np.squeeze(t.sum(t.pow(self._distance_difference(X[0], self.weights), 2), 2))[None, :]
-        # distances.extend(prev_activation)
         prev_activation = self._init_prev(X)
 
         for x in X:
             prev_activation = self._get_bmus(x, prev_activation=prev_activation)[0]
             distances.extend(prev_activation)
 
-        return t.stack(distances)
+        return np.array(distances)
 
 
 class Recurrent(Sequential):
 
-    def __init__(self, map_dim, data_dim, learning_rate, alpha, sigma=None, lrfunc=expo, nbfunc=expo, min_max=t.min, distance_function=euclidean):
+    def __init__(self, map_dim, data_dim, learning_rate, alpha, sigma=None, lrfunc=expo, nbfunc=expo, min_max=np_min, distance_function=euclidean):
         """
         A recurrent SOM
 
@@ -161,7 +158,7 @@ class Recurrent(Sequential):
 
     def _init_prev(self, X):
 
-        return t.zeros(X.size()[1], self.weight_dim, X.size()[2])
+        return np.zeros(X.size()[1], self.weight_dim, X.size()[2])
 
     def _example(self, x, influences, **kwargs):
         """
@@ -197,7 +194,7 @@ class Recurrent(Sequential):
         # Since euclidean norm is sqrt(sum(square(x)))) we can leave out the sqrt
         # and avoid doing an extra square.
         # Axis 2 because we are doing minibatches.
-        activation = t.squeeze(t.stack([t.sum(t.pow(d, 2), 1) for d in distances]), 2)
+        activation = np.squeeze(np.array([np.sum(np.square(d), 1) for d in distances]), 2)
         return activation, difference_x
 
     def _predict_base(self, X):
@@ -210,17 +207,19 @@ class Recurrent(Sequential):
         """
 
         X = self._create_batches(X, 1)
-        X = t.from_numpy(np.asarray(X, dtype=np.float32))
+        X = np.asarray(X, dtype=np.float32)
 
         distances = []
 
+        # prev_activation = np.squeeze(t.sum(t.pow(self._distance_difference(X[0], self.weights), 2), 2))[None, :]
+        # distances.extend(prev_activation)
         prev_distance = self._init_prev(X)
 
         for x in X:
             prev_activation, prev_distance = self._get_bmus(x, prev_activation=prev_distance)
             distances.extend(prev_activation)
 
-        return t.stack(distances)
+        return np.array(distances)
 
 
 class Recursive(Sequential):
@@ -253,10 +252,10 @@ class Recursive(Sequential):
                          lrfunc,
                          nbfunc,
                          sigma,
-                         min_max=t.max,
+                         min_max=np_max,
                          influence_size=reduce(np.multiply, map_dim))
 
-        self.context_weights = t.zeros((self.weight_dim, self.weight_dim))
+        self.context_weights = np.zeros((self.weight_dim, self.weight_dim))
         self.alpha = alpha
         self.beta = beta
 
@@ -281,8 +280,8 @@ class Recursive(Sequential):
 
         influence, bmu = self._apply_influences(activation, influences)
         # Update
-        self.weights += t.mean(self._calculate_update(diff_x, influence[:, :, :self.data_dim]), 0)
-        res = t.squeeze(t.mean(self._calculate_update(diff_context, influence), 0))
+        self.weights += np.mean(self._calculate_update(diff_x, influence[:, :, :self.data_dim]), 0)
+        res = np.squeeze(np.mean(self._calculate_update(diff_context, influence), 0))
         self.context_weights += res
 
         return activation
@@ -301,7 +300,7 @@ class Recursive(Sequential):
         distance_x = self.distance_function(x, self.weights)
         distance_y = self.distance_function(prev_activation, self.context_weights)
 
-        activation = t.exp(-(t.mul(distance_x, self.alpha) + t.mul(distance_y, self.beta)))
+        activation = np.exp(-(np.multiply(distance_x, self.alpha) + np.multiply(distance_y, self.beta)))
 
         return activation, difference_x, difference_y
 
@@ -319,7 +318,7 @@ class Recursive(Sequential):
         data = json.load(open(path))
 
         weights = data['weights']
-        weights = t.from_numpy(np.asarray(weights, dtype=np.float32))
+        weights = np.asarray(weights, dtype=np.float32)
         datadim = weights.shape[1]
 
         dimensions = data['dimensions']
@@ -330,9 +329,9 @@ class Recursive(Sequential):
 
         try:
             context_weights = data['context_weights']
-            context_weights = t.from_numpy(np.asarray(context_weights, dtype=np.float32))
+            context_weights = np.asarray(context_weights, dtype=np.float32)
         except KeyError:
-            context_weights = t.zeros((len(weights), len(weights)))
+            context_weights = np.zeros((len(weights), len(weights)))
 
         try:
             alpha = data['alpha']
@@ -372,7 +371,7 @@ class Recursive(Sequential):
 
 class Merging(Sequential):
 
-    def __init__(self, map_dim, data_dim, learning_rate, alpha, beta, sigma=None, lrfunc=expo, nbfunc=expo, min_max=t.min, distance_function=euclidean):
+    def __init__(self, map_dim, data_dim, learning_rate, alpha, beta, sigma=None, lrfunc=expo, nbfunc=expo, min_max=np_min, distance_function=euclidean):
         """
         A merging som
 
@@ -396,7 +395,7 @@ class Merging(Sequential):
 
         self.alpha = alpha
         self.beta = beta
-        self.context_weights = t.ones(self.weights.size())
+        self.context_weights = np.ones_like(self.weights)
         self.entropy = 0
 
     def _epoch(self, X, nb_update_counter, lr_update_counter, idx, nb_step, lr_step, show_progressbar):
@@ -419,8 +418,6 @@ class Merging(Sequential):
         influences = self._calculate_influence(map_radius) * learning_rate
 
         prev_activation = self._init_prev(X)
-        print(prev_activation.size())
-        print(X.size())
         bmus = []
 
         update = False
@@ -464,15 +461,15 @@ class Merging(Sequential):
         :param batch_size: The pytorch size
         :return: The activation
         """
-        prev_bmu = t.min(kwargs['prev_activation'], 1)[1].t()[0]
+        prev_bmu = self.min_max(kwargs['prev_activation'], 1)[1]
         context = (1 - self.beta) * self.weights[prev_bmu] + self.beta * self.context_weights[prev_bmu]
 
         # Get the indices of the Best Matching Units, given the data.
         activation, diff_x, diff_context = self._get_bmus(x, prev_activation=context)
         influence, bmu = self._apply_influences(activation, influences)
 
-        self.weights += t.mean(self._calculate_update(diff_x, influence), 0)
-        self.context_weights += t.mean(self._calculate_update(diff_context, influence), 0)
+        self.weights += np.mean(self._calculate_update(diff_x, influence), 0)
+        self.context_weights += np.mean(self._calculate_update(diff_context, influence), 0)
 
         return activation
 
@@ -526,7 +523,7 @@ class Merging(Sequential):
         distances_y = self.distance_function(kwargs['prev_activation'], self.context_weights)
 
         # BMU is based on a weighted addition of current and previous activation.
-        activations = t.squeeze((t.mul(distances_x, 1 - self.alpha) + t.mul(distances_y, self.alpha)), 1)
+        activations = np.multiply(distances_x, 1 - self.alpha) + np.multiply(distances_y, self.alpha)
 
         return activations, differences_x, differences_y
 
@@ -539,21 +536,19 @@ class Merging(Sequential):
         each node has to each input.
         """
 
-        X = self._create_batches(X, 1)
-        X = t.from_numpy(np.asarray(X, dtype=np.float32))
+        X = self._create_batches(X, len(X))
+        X = np.asarray(X, dtype=np.float32)
 
         distances = []
 
-        # prev_activation = np.squeeze(t.sum(t.pow(self._distance_difference(X[0], self.weights), 2), 2))[None, :]
-        # distances.extend(prev_activation)
         prev_activation = self._init_prev(X)
 
         for x in X:
-            prev_activation = self.weights[self.min_max(prev_activation, 1)[1].t()[0]]
+            prev_activation = self.weights[self.min_max(prev_activation, 1)[1]]
             prev_activation = self._get_bmus(x, prev_activation=prev_activation)[0]
             distances.extend(prev_activation)
 
-        return t.stack(distances)
+        return np.array(distances)
 
     @classmethod
     def load(cls, path):
@@ -570,7 +565,7 @@ class Merging(Sequential):
         data = json.load(open(path))
 
         weights = data['weights']
-        weights = t.from_numpy(np.array(weights, dtype=np.float32))
+        weights = np.array(weights, dtype=np.float32)
 
         datadim = weights.shape[1]
         dimensions = data['dimensions']
@@ -582,9 +577,9 @@ class Merging(Sequential):
 
         try:
             context_weights = data['context_weights']
-            context_weights = t.from_numpy(np.array(context_weights, dtype=np.float32))
+            context_weights = np.array(context_weights, dtype=np.float32)
         except KeyError:
-            context_weights = t.ones(weights.shape)
+            context_weights = np.ones(weights.shape)
 
         try:
             alpha = data['alpha']

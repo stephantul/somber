@@ -2,6 +2,19 @@ import time
 import sys
 import numpy as np
 
+from functools import partial
+
+
+def np_minmax(func1, func2, X, axis=None):
+
+    if axis is None:
+        return func1(X)
+    else:
+        return func1(X, axis), func2(X, axis)
+
+np_min = partial(np_minmax, np.min, np.argmin)
+np_max = partial(np_minmax, np.max, np.argmax)
+
 
 def expo(value, current_step, total_steps):
     """

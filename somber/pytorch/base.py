@@ -1,13 +1,12 @@
 import logging
-import time
-import numpy as np
 import torch as t
+import numpy as np
+import time
 import json
 
-from somber.utils import expo, linear, progressbar
+from somber.utils import expo, progressbar, linear
 from functools import reduce
-from collections import Counter, defaultdict
-
+from collections import defaultdict, Counter
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +32,7 @@ def euclidean(x, weights):
     return res
 
 
-class Som(object):
+class MainMixin(object):
     """
     This is the batched version of the basic SOM class.
     """
@@ -89,7 +88,7 @@ class Som(object):
         self.nbfunc = nbfunc
 
         # Initialize the distance grid: only needs to be done once.
-        self.distance_grid = self._initialize_distance_grid()
+        # self.distance_grid = self._initialize_distance_grid()
         self.min_max = min_max
         self.trained = False
 
@@ -183,7 +182,7 @@ class Som(object):
 
         map_radius = self.nbfunc(self.sigma, nb_step, len(nb_update_counter))
         learning_rate = self.lrfunc(self.learning_rate, lr_step, len(lr_update_counter))
-        influences = self._calculate_influence(map_radius) * learning_rate
+        influences = self._calculate_influence(map_radius, self.influence_size, self.weight_dim) * learning_rate
 
         update = False
 
@@ -204,7 +203,7 @@ class Som(object):
                 update = True
 
             if update:
-                influences = self._calculate_influence(map_radius) * learning_rate
+                influences = self._calculate_influence(map_radius, self.influence_size, self.weight_dim) * learning_rate
                 update = False
 
             idx += 1
@@ -239,7 +238,8 @@ class Som(object):
         """
 
         activation, difference_x = self._get_bmus(x)
-        influence, bmu = self._apply_influences(activation, influences)
+        bmu = np.squeeze(t.min(activation, 1)[1])
+        influence = self._apply_influences(bmu, influences)
         self.weights += self._calculate_update(difference_x, influence).mean(0)
 
         return activation
@@ -274,66 +274,6 @@ class Som(object):
             distances.extend(distance)
 
         return t.stack(distances)
-
-    def _apply_influences(self, activations, influences):
-        """
-        First calculates the BMU.
-        Then gets the appropriate influence from the neighborhood, given the BMU
-
-        :param activations: A Numpy array of distances.
-        :param influences: A (map_dim, map_dim, data_dim) array describing the influence
-        each node has on each other node.
-        :return: The influence given the bmu, and the index of the bmu itself.
-        """
-
-        bmu = self.min_max(activations, 1)[1].t()[0]
-        return influences[bmu], bmu
-
-    def _calculate_influence(self, sigma):
-        """
-        Pre-calculates the influence for a given value of sigma.
-
-        The neighborhood has size map_dim * map_dim, so for a 30 * 30 map, the neighborhood will be
-        size (900, 900). It is then duplicated _data_dim times, and reshaped into an
-        (map_dim, map_dim, data_dim) array. This is done to facilitate fast calculation in subsequent steps.
-
-        :param sigma: The neighborhood value.
-        :return: The neighborhood, reshaped into an array
-        """
-
-        neighborhood = t.exp(-self.distance_grid / (2.0 * sigma ** 2)).view(self.weight_dim, self.weight_dim)
-        return t.stack([neighborhood] * self.influence_size).transpose(0,2).transpose(0,1)
-
-    def _initialize_distance_grid(self):
-        """
-        Initializes the distance grid by calls to _grid_dist.
-
-        :return:
-        """
-
-        p = [self._grid_distance(i).view(1, self.weight_dim) for i in range(self.weight_dim)]
-        return t.stack(p)
-
-    def _grid_distance(self, index):
-        """
-        Calculates the distance grid for a single index position. This is pre-calculated for
-        fast neighborhood calculations later on (see _calc_influence).
-
-        :param index: The index for which to calculate the distances.
-        :return: A flattened version of the distance array.
-        """
-
-        width, height = self.map_dimensions
-
-        row = index // width
-        column = index % width
-
-        x = t.abs(t.arange(0, self.weight_dim).view(self.map_dimensions) % width - row)
-        y = t.abs(t.arange(0, self.weight_dim).view(self.map_dimensions) % height - column).transpose(1, 0)
-
-        distance = x + y
-
-        return distance.view(distance.numel())
 
     def map_weights(self):
         """
@@ -519,3 +459,123 @@ class Som(object):
         Already includes the learning rate.
         """
         return difference_vector * influence
+
+
+class MapMixin(object):
+    """
+    This is the basic SOM class.
+    """
+
+    def __init__(self, map_dim, influence_size):
+
+        self.distance_grid = self._initialize_distance_grid(map_dim, influence_size)
+
+    def _apply_influences(self, bmu, influences):
+        """
+        First calculates the BMU.
+        Then gets the appropriate influence from the neighborhood, given the BMU
+
+        :param activations: A Numpy array of distances.
+        :param influences: A (map_dim, map_dim, data_dim) array describing the influence
+        each node has on each other node.
+        :return: The influence given the bmu, and the index of the bmu itself.
+        """
+        return influences[bmu]
+
+    def _calculate_influence(self, sigma, influence_size, weight_dim):
+        """
+        Pre-calculates the influence for a given value of sigma.
+
+        The neighborhood has size map_dim * map_dim, so for a 30 * 30 map, the neighborhood will be
+        size (900, 900). It is then duplicated _data_dim times, and reshaped into an
+        (map_dim, map_dim, data_dim) array. This is done to facilitate fast calculation in subsequent steps.
+
+        :param sigma: The neighborhood value.
+        :return: The neighborhood, reshaped into an array
+        """
+
+        neighborhood = t.exp(-self.distance_grid / (2.0 * sigma ** 2)).view(weight_dim, weight_dim)
+        return t.stack([neighborhood] * influence_size).transpose(0,2).transpose(0,1)
+
+    def _initialize_distance_grid(self, map_dimensions, weight_dim):
+        """
+        Initializes the distance grid by calls to _grid_dist.
+
+        :return:
+        """
+
+        p = [self._grid_distance(i, map_dimensions, weight_dim).view(1, weight_dim) for i in range(weight_dim)]
+        return t.stack(p)
+
+    def _grid_distance(self, index, map_dimensions, weight_dim):
+        """
+        Calculates the distance grid for a single index position. This is pre-calculated for
+        fast neighborhood calculations later on (see _calc_influence).
+
+        :param index: The index for which to calculate the distances.
+        :return: A flattened version of the distance array.
+        """
+
+        width, height = map_dimensions
+
+        row = index // width
+        column = index % width
+
+        x = t.abs(t.arange(0, weight_dim).view(map_dimensions) % width - row)
+        y = t.abs(t.arange(0, weight_dim).view(map_dimensions) % height - column).transpose(1, 0)
+
+        distance = x + y
+
+        return distance.view(distance.numel())
+
+
+class Testo(MainMixin, MapMixin):
+
+    def __init__(self,
+                 map_dim,
+                 data_dim,
+                 learning_rate,
+                 lrfunc=expo,
+                 nbfunc=expo,
+                 sigma=None,
+                 min_max=t.min,
+                 distance_function=euclidean,
+                 influence_size=None):
+
+        influence_size = data_dim if influence_size is None else influence_size
+
+        MainMixin.__init__(self, map_dim=map_dim, data_dim=data_dim, learning_rate=learning_rate, lrfunc=lrfunc, nbfunc=nbfunc)
+        MapMixin.__init__(self, map_dim, self.weight_dim)
+
+
+if __name__ == "__main__":
+
+    tes = Testo(map_dim=(10, 10), data_dim=3, learning_rate=0.3)
+
+    X = np.array(
+            [[0., 0., 0.],
+             [0., 0., 1.],
+             [0., 0., 0.5],
+             [0.125, 0.529, 1.0],
+             [0.33, 0.4, 0.67],
+             [0.6, 0.5, 1.0],
+             [0., 1., 0.],
+             [1., 0., 0.],
+             [0., 1., 1.],
+             [1., 0., 1.],
+             [1., 1., 0.],
+             [1., 1., 1.],
+             [.33, .33, .33],
+             [.5, .5, .5],
+             [.66, .66, .66]])
+
+    X = np.asarray([X] * 100).reshape(X.shape[0] * 100, 3)
+    print(X.shape)
+
+    color_names = \
+        ['black', 'blue', 'darkblue', 'skyblue',
+         'greyblue', 'lilac', 'green', 'red',
+         'cyan', 'violet', 'yellow', 'white',
+         'darkgrey', 'mediumgrey', 'lightgrey']
+
+    tes.train(X, 10, batch_size=10)
