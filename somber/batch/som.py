@@ -3,7 +3,7 @@ import time
 import numpy as np
 import json
 
-from somber.utils import expo, linear, progressbar, np_min
+from ..utils import expo, linear, progressbar, np_min
 from functools import reduce
 from collections import Counter, defaultdict
 
@@ -48,6 +48,8 @@ class Som(object):
                  distance_function=euclidean,
                  influence_size=None):
         """
+
+
         :param map_dim: A tuple of map dimensions, e.g. (10, 10) instantiates a 10 by 10 map.
         :param data_dim: The data dimensionality.
         :param learning_rate: The learning rate, which is decreases according to some function
@@ -184,9 +186,8 @@ class Som(object):
         learning_rate = self.lrfunc(self.learning_rate, lr_step, len(lr_update_counter))
         influences = self._calculate_influence(map_radius) * learning_rate
 
-        update = False
-
-        for x in progressbar(X, use=show_progressbar, mult=self.progressbar_mult, idx_interval=self.progressbar_interval):
+        # Iterate over the training data
+        for x in progressbar(X, use=show_progressbar):
 
             self._example(x, influences)
 
@@ -194,17 +195,21 @@ class Som(object):
                 nb_step += 1
 
                 map_radius = self.nbfunc(self.sigma, nb_step, len(nb_update_counter))
-                update = True
+                logger.info("Updated map radius: {0}".format(map_radius))
+
+                # The map radius has been updated, so the influence
+                # needs to be recalculated
+                influences = self._calculate_influence(map_radius) * learning_rate
 
             if idx in lr_update_counter:
                 lr_step += 1
 
+                # Reset the influences back to 1
+                influences /= learning_rate
                 learning_rate = self.lrfunc(self.learning_rate, lr_step, len(lr_update_counter))
-                update = True
-
-            if update:
-                influences = self._calculate_influence(map_radius) * learning_rate
-                update = False
+                logger.info("Updated learning rate: {0}".format(learning_rate))
+                # Recalculate the influences
+                influences *= learning_rate
 
             idx += 1
 
@@ -232,9 +237,9 @@ class Som(object):
         A single example.
 
         :param X: a numpy array of data
-        :param map_radius: The radius at the current epoch, given the learning rate and map size
-        :param learning_rates: The learning rate.
-        :return: The activation
+        :param influences: The influence at the current epoch,
+        given the learning rate and map size
+        :return: A vector describing activation values for each unit.
         """
 
         activation, difference_x = self._get_bmus(x)
@@ -257,6 +262,8 @@ class Som(object):
         """
         Predicts distances to some input data.
 
+        This function should not be directly used.
+
         :param X: The input data.
         :return: An array of arrays, representing the activation
         each node has to each input.
@@ -264,13 +271,13 @@ class Som(object):
 
         X = self._create_batches(X, 1)
 
-        distances = []
+        activations = []
 
         for x in X:
-            distance, _ = self._get_bmus(x)
-            distances.extend(distance)
+            activation, _ = self._get_bmus(x)
+            activations.extend(activation)
 
-        return np.array(distances)
+        return np.array(activations)
 
     def _apply_influences(self, activations, influences):
         """
@@ -290,9 +297,11 @@ class Som(object):
         """
         Pre-calculates the influence for a given value of sigma.
 
-        The neighborhood has size map_dim * map_dim, so for a 30 * 30 map, the neighborhood will be
-        size (900, 900). It is then duplicated _data_dim times, and reshaped into an
-        (map_dim, map_dim, data_dim) array. This is done to facilitate fast calculation in subsequent steps.
+        The neighborhood has size map_dim * map_dim, so for a 30 * 30 map,
+        the neighborhood will be size (900, 900).
+        It is then duplicated influence_size times, and reshaped into an
+        (map_dim, map_dim, influence_size) array.
+        This is done to facilitate fast calculation in subsequent steps.
 
         :param sigma: The neighborhood value.
         :return: The neighborhood, reshaped into an array
@@ -334,7 +343,9 @@ class Som(object):
 
     def map_weights(self):
         """
-        Retrieves the grid as a list of lists of weights. For easy visualization.
+        Retrieves the grid as a list of lists of weights.
+
+        For easy visualization using matplotlib.
 
         :return: A three-dimensional Numpy array of values (width, height, data_dim)
         """
@@ -390,8 +401,11 @@ class Som(object):
 
     def quant_error(self, X):
         """
-        Calculates the quantization error by taking the minimum euclidean
-        distance between the units and some input.
+        Calculates the quantization error.
+
+        Calculates the quantization error by calculating the euclidean
+        distance between each input datum and the weights and then
+        taking the minimum.
 
         :param X: Input data.
         :return: A vector of numbers, representing the quantization error
@@ -403,7 +417,7 @@ class Som(object):
 
     def predict(self, X):
         """
-        Predict the BMU for each input data.
+        Predict the BMU for each input datum.
 
         :param X: Input data.
         :return: The index of the bmu which best describes the input data.
@@ -465,13 +479,14 @@ class Som(object):
 
         Works best for symbolic (instead of continuous) input data.
 
-        :param X: Input data
+        :param X: An array of input data.
         :param identities: The identities for each
         input datum, must be same length as X
         :return: A numpy array with identities, the shape of the map.
         """
 
-        assert len(X) == len(identities)
+        if len(X) != len(identities):
+            raise ValueError("X and identities are not the same length: {0} and {1}".format(len(X), len(identities)))
 
         # Remove all duplicates from X
         X_unique, names = zip(*set([tuple((tuple(s), n)) for s, n in zip(X, identities)]))
@@ -492,8 +507,8 @@ class Som(object):
         Gets the best matching units, based on euclidean distance.
 
         :param x: The input vector
-        :return: The activations, which is a vector of map_dim, and
-         the distances between the input and the weights, which can be
+        :return: The activations, and
+         the differences between the input and the weights, which can be
          reused in the update calculation.
         """
 
@@ -503,10 +518,13 @@ class Som(object):
 
     def _calculate_update(self, difference_vector, influence):
         """
-        Updates the nodes, conditioned on the input vector,
-        the influence, as calculated above, and the learning rate.
+        Multiplies the difference vector with the influence vector
 
-        Uses Oja's Rule: delta_W = alpha * (X - w)
+        The influence vector is chosen based on the BMU, so that the update
+        done to the every weight node is proportional to its distance from the
+        BMU.
+
+        Implicitly uses Oja's Rule: delta_W = alpha * (X - w)
 
         In this case (X - w) has been precomputed for speed, in the function
         _get_bmus.
