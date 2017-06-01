@@ -1,5 +1,6 @@
 import numpy as np
 from somber.pytorch.sequential import Recursive
+from somber.pytorch.som import Som
 
 
 def gen_data(dlen=10000):
@@ -25,8 +26,8 @@ if __name__ == "__main__":
     import cProfile
 
     X, desc = gen_data(10000)
-    # r = Recursive((10, 10), data_dim=3, learning_rate=.3, alpha=3.0, beta=.9)
-    # cProfile.run("r.train(X, 2, show_progressbar=True, batch_size=1)")
+    s = Som((10, 10), data_dim=3, learning_rate=.3)
+    s.train(X, 2, show_progressbar=True, batch_size=1)
 
-    r_2 = Recursive((10, 10), data_dim=3, learning_rate=.3, alpha=3.0, beta=1.1)
-    r_2.train(X, 2, show_progressbar=True, batch_size=2)
+    # r_2 = Recursive((10, 10), data_dim=3, learning_rate=.3, alpha=3.0, beta=1.1)
+    # r_2.train(X, 2, show_progressbar=True, batch_size=2)

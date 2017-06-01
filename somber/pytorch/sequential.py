@@ -109,7 +109,10 @@ class Sequential(Som):
         influences = self._calculate_influence(map_radius) * learning_rate
 
         # Iterate over the training data
-        for x in progressbar(X, use=show_progressbar):
+        for x in progressbar(X,
+                             use=show_progressbar,
+                             mult=self.progressbar_mult,
+                             idx_interval=self.progressbar_interval):
 
             prev_activation = self._example(x,
                                             influences,
@@ -182,15 +185,15 @@ class Sequential(Som):
         X = self._create_batches(X, 1)
         X = t.from_numpy(np.asarray(X, dtype=np.float32))
 
-        distances = []
+        activations = []
 
         prev = self._init_prev(X)
 
         for x in X:
             prev = self._get_bmus(x, prev_activation=prev)[0]
-            distances.extend()
+            activations.extend(prev)
 
-        return t.stack(distances)
+        return t.stack(activations)
 
 
 class Recurrent(Sequential):
@@ -298,15 +301,15 @@ class Recurrent(Sequential):
         X = self._create_batches(X, 1)
         X = t.from_numpy(np.asarray(X, dtype=np.float32))
 
-        distances = []
+        activations = []
 
-        prev_distance = self._init_prev(X)
+        prev = self._init_prev(X)
 
         for x in X:
-            prev_activation, prev_distance = self._get_bmus(x, prev_activation=prev_distance)
-            distances.extend(prev_activation)
+            prev_activation, prev = self._get_bmus(x, prev_activation=prev)
+            activations.extend(prev_activation)
 
-        return t.stack(distances)
+        return t.stack(activations)
 
 
 class Recursive(Sequential):
@@ -577,7 +580,10 @@ class Merging(Sequential):
         prev = self._init_prev(X)
 
         # Iterate over the training data
-        for x in progressbar(X, use=show_progressbar):
+        for x in progressbar(X,
+                             use=show_progressbar,
+                             mult=self.progressbar_mult,
+                             idx_interval=self.progressbar_interval):
 
             prev = self._example(x,
                                  influences,

@@ -20,7 +20,6 @@ def euclidean(x, weights):
     :return: A matrix containing the distance between each
     weight and each input.
     """
-
     m_norm = np.sum(np.square(x), axis=1)
     w_norm = np.sum(np.square(weights), axis=1)
     dotted = np.dot(np.multiply(x, 2), weights.T)
@@ -170,8 +169,7 @@ class Som(object):
 
         for epoch in range(num_epochs):
 
-            if show_progressbar:
-                print("Epoch {0} of {1}".format(epoch, num_epochs))
+            logger.info("Epoch {0} of {1}".format(epoch, num_epochs))
 
             idx, nb_step, lr_step = self._epoch(X,
                                                 nb_update_counter,
@@ -222,8 +220,10 @@ class Som(object):
         influences = self._calculate_influence(map_radius) * learning_rate
 
         # Iterate over the training data
-        for x in progressbar(X, use=show_progressbar):
-
+        for x in progressbar(X,
+                             use=show_progressbar,
+                             mult=self.progressbar_mult,
+                             idx_interval=self.progressbar_interval):
             self._example(x, influences)
 
             if idx in nb_update_counter:
@@ -351,8 +351,8 @@ class Som(object):
         # Reshape neighborhood
         neighborhood = neighborhood.reshape(self.weight_dim, self.weight_dim)
         # Repeat neighborhood self.influence_size times
-        neighborhood = neighborhood.transpose((1, 2, 0))
-        return np.array([neighborhood] * self.influence_size)
+        neighborhood = np.array([neighborhood] * self.influence_size)
+        return neighborhood.transpose((1, 2, 0))
 
     def _initialize_distance_grid(self):
         """
@@ -379,7 +379,7 @@ class Som(object):
         column = index % width
 
         # Fast way to construct distance matrix
-        f = np.arange(0, self.weight_dim).view(self.map_dimensions)
+        f = np.arange(0, self.weight_dim).reshape(self.map_dimensions)
         x = np.abs(f % width - row)
         y = np.abs(f % height - column).transpose(1, 0)
 
