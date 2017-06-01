@@ -1,6 +1,6 @@
 import numpy as np
 
-from somber.som import Som
+from somber.pytorch.sequential import Recursive
 
 X = np.array(
      [[0., 0., 0.],
@@ -29,10 +29,14 @@ color_names = \
      'darkgrey', 'mediumgrey', 'lightgrey']
 
 # initialize
-s = Som((10, 10), data_dim=3, learning_rate=0.3)
+s = Recursive((10, 10), data_dim=1, alpha=3.0, beta=1.0, learning_rate=0.3)
 
 # train
-s.train(X, num_epochs=100, total_updates=1000, show_progressbar=True)
+X = np.random.binomial(1, 0.5, 300000)[:, np.newaxis]
+s.train(X, num_epochs=100, total_updates=1000, show_progressbar=True, batch_size=1)
+
+s_2 = Recursive((10, 10), data_dim=1, alpha=3.0, beta=1.0, learning_rate=0.3)
+s_2.train(X, num_epochs=100, total_updates=1000, show_progressbar=True, batch_size=10)
 
 # predict: get the index of each best matching unit.
 # predictions = s.predict(X)

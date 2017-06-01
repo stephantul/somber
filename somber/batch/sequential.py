@@ -2,8 +2,8 @@ import numpy as np
 import logging
 import json
 
-from somber.batch.som import Som, euclidean
-from somber.utils import expo, progressbar, linear, np_min, np_max
+from .som import Som, euclidean
+from ..utils import expo, progressbar, linear, np_min, np_max
 from functools import reduce
 
 
@@ -11,6 +11,11 @@ logger = logging.getLogger(__name__)
 
 
 class Sequential(Som):
+    """
+    A base class for sequential SOMs, removing some code duplication.
+
+    Not usable as a stand-alone class
+    """
 
     def __init__(self,
                  map_dim,
@@ -22,7 +27,22 @@ class Sequential(Som):
                  min_max=np_min,
                  distance_function=euclidean,
                  influence_size=None):
+        """
+        A base class for sequential SOMs, removing some code duplication.
 
+        :param map_dim: A tuple describing the MAP size.
+        :param data_dim: The dimensionality of the input matrix.
+        :param learning_rate: The learning rate.
+        :param sigma: The neighborhood factor.
+        :param lrfunc: The function used to decrease the learning rate.
+        :param nbfunc: The function used to decrease the neighborhood
+        :param min_max: The function used to determine the winner.
+        :param distance_function: The function used to do distance calculation.
+        Euclidean by default.
+        :param influence_size: The size of the influence matrix.
+        Usually reverts to data_dim, but can be
+        larger.
+        """
         super().__init__(map_dim,
                          data_dim,
                          learning_rate,
@@ -34,53 +54,90 @@ class Sequential(Som):
                          influence_size=influence_size)
 
     def _init_prev(self, X):
+        """
+        A safe initialization for the first previous value.
 
+        :param X: The input data.
+        :return: A matrix of the appropriate size for simulating contexts.
+        """
         return np.zeros((X.shape[1], self.weight_dim))
 
-    def _epoch(self, X, nb_update_counter, lr_update_counter, idx, nb_step, lr_step, show_progressbar):
+    def _epoch(self,
+               X,
+               nb_update_counter,
+               lr_update_counter,
+               idx,
+               nb_step,
+               lr_step,
+               show_progressbar):
         """
         A single epoch.
 
+        This function uses an index parameter which is passed around to see to
+        how many training items the SOM has been exposed globally.
+
+        nb and lr_update_counter hold the indices at which the neighborhood
+        size and learning rates need to be updated.
+        These are therefore also passed around. The nb_step and lr_step
+        parameters indicate how many times the neighborhood
+        and learning rate parameters have been updated already.
+
         :param X: The training data.
-        :param nb_update_counter: The epochs at which to update the neighborhood.
-        :param lr_update_counter: The epochs at which to updat the learning rate.
+        :param nb_update_counter: The indices at which to
+        update the neighborhood.
+        :param lr_update_counter: The indices at which to
+        update the learning rate.
         :param idx: The current index.
         :param nb_step: The current neighborhood step.
         :param lr_step: The current learning rate step.
         :param show_progressbar: Whether to show a progress bar or not.
-        :param context_mask: The context mask.
-        :return:
+        :return: The index, neighborhood step and learning rate step
         """
-
+        # Initialize the previous activation
         prev_activation = self._init_prev(X)
 
         # Calculate the influences for update 0.
-        map_radius = self.nbfunc(self.sigma, nb_step, len(nb_update_counter))
-        learning_rate = self.lrfunc(self.learning_rate, lr_step, len(lr_update_counter))
+        map_radius = self.nbfunc(self.sigma,
+                                 nb_step,
+                                 len(nb_update_counter))
+
+        learning_rate = self.lrfunc(self.learning_rate,
+                                    lr_step,
+                                    len(lr_update_counter))
+
         influences = self._calculate_influence(map_radius) * learning_rate
-        update = False
 
-        for x in progressbar(X, use=show_progressbar):
+        # Iterate over the training data
+        for x in progressbar(X, use=show_progressbar, logger=logger):
 
-            prev_activation = self._example(x, influences, prev_activation=prev_activation)
+            prev_activation = self._example(x,
+                                            influences,
+                                            prev_activation=prev_activation)
 
             if idx in nb_update_counter:
                 nb_step += 1
 
-                map_radius = self.nbfunc(self.sigma, nb_step, len(nb_update_counter))
+                map_radius = self.nbfunc(self.sigma,
+                                         nb_step,
+                                         len(nb_update_counter))
                 logger.info("Updated map radius: {0}".format(map_radius))
-                update = True
+
+                # The map radius has been updated, so the influence
+                # needs to be recalculated
+                influences = self._calculate_influence(map_radius)
+                influences *= learning_rate
 
             if idx in lr_update_counter:
                 lr_step += 1
 
-                learning_rate = self.lrfunc(self.learning_rate, lr_step, len(lr_update_counter))
+                # Reset the influences back to 1
+                influences /= learning_rate
+                learning_rate = self.lrfunc(self.learning_rate,
+                                            lr_step,
+                                            len(lr_update_counter))
                 logger.info("Updated learning rate: {0}".format(learning_rate))
-                update = True
-
-            if update:
-                influences = self._calculate_influence(map_radius) * learning_rate
-                update = False
+                # Recalculate the influences
+                influences *= learning_rate
 
             idx += 1
 
@@ -88,21 +145,24 @@ class Sequential(Som):
 
     def _create_batches(self, X, batch_size):
         """
-        Creates batches out of a sequential piece of data.
+        Create subsequences out of a sequential piece of data.
+
         Assumes ndim(X) == 2.
 
-        This function will append zeros to the end of your data to make all batches even-sized.
+        This function will append zeros to the end of your data to make
+        sure all batches even-sized.
 
-        For the recursive SOM, this function does not simply resize your data. It will create
-        subsequences.
-
-        :param X: A numpy array, representing your input data. Must have 2 dimensions.
+        :param X: A numpy array, representing your input data.
+        Must have 2 dimensions.
         :param batch_size: The desired pytorch size.
         :return: A batched version of your data.
         """
-
-        # This line first resizes the data to (batch_size, len(X) / batch_size, data_dim)
-        X = np.resize(X, (batch_size, int(np.ceil(X.shape[0] / batch_size)), X.shape[1]))
+        self.progressbar_interval = 1
+        self.progressbar_mult = batch_size
+        max_x = int(np.ceil(X.shape[0] / batch_size))
+        # This line first resizes the data to
+        # (batch_size, len(X) / batch_size, data_dim)
+        X = np.resize(X, (batch_size, max_x, X.shape[1]))
         # Transposes it to (len(X) / batch_size, batch_size, data_dim)
         return X.transpose((1, 0, 2))
 
@@ -112,72 +172,98 @@ class Sequential(Som):
 
     def _predict_base(self, X):
         """
-        Predicts distances to some input data.
+        Predict distances to some input data.
 
         :param X: The input data.
         :return: An array of arrays, representing the activation
         each node has to each input.
         """
-
         X = self._create_batches(X, len(X))
         X = np.asarray(X, dtype=np.float32)
 
         distances = []
 
-        prev_activation = self._init_prev(X)
+        prev = self._init_prev(X)
 
         for x in X:
-            prev_activation = self._get_bmus(x, prev_activation=prev_activation)[0]
-            distances.extend(prev_activation)
+            prev = self._get_bmus(x, prev_activation=prev)[0]
+            distances.extend(prev)
 
         return np.array(distances)
 
 
 class Recurrent(Sequential):
+    """A recurrent SOM."""
 
-    def __init__(self, map_dim, data_dim, learning_rate, alpha, sigma=None, lrfunc=expo, nbfunc=expo, min_max=np_min, distance_function=euclidean):
+    def __init__(self,
+                 map_dim,
+                 data_dim,
+                 learning_rate,
+                 alpha,
+                 sigma=None,
+                 lrfunc=expo,
+                 nbfunc=expo,
+                 min_max=np_min,
+                 distance_function=euclidean,
+                 influence_size=None):
         """
-        A recurrent SOM
+        A recurrent SOM.
 
-        The recurrent SOM attempts to model sequences by integrating the current weight vector
-        with the activation in the previous time-step. Weights thus become shared between current
-        and previous activation.
+        The recurrent SOM attempts to model sequences by integrating
+        the current weight vector with the activation in the previous
+        time-step. Weights thus become shared between current and previous
+        activation.
 
-        :param map_dim: A tuple of map dimensions, e.g. (10, 10) instantiates a 10 by 10 map.
+        :param map_dim: A tuple of map dimensions,
+        e.g. (10, 10) instantiates a 10 by 10 map.
         :param data_dim: The data dimensionality.
-        :param learning_rate: The learning rate, which is decreases according to some function
-        :param lrfunc: The function to use in decreasing the learning rate. The functions are
-        defined in utils. Default is exponential.
-        :param nbfunc: The function to use in decreasing the neighborhood size. The functions
-        are defined in utils. Default is exponential.
-        :param alpha: a float between 0 and 1, specifying how much weight the previous activation
-        receives in comparison to the current activation
-        :param sigma: The starting value for the neighborhood size, which is decreased over time.
-        If sigma is None (default), sigma is calculated as ((max(map_dim) / 2) + 0.01), which is
-        generally a good value.
+        :param learning_rate: The learning rate, which is decreased
+        according to some function.
+        :param lrfunc: The function to use in decreasing the learning rate.
+        The functions are defined in utils. Default is exponential.
+        :param nbfunc: The function to use in decreasing the neighborhood size.
+        The functions are defined in utils. Default is exponential.
+        :param alpha: a float between 0 and 1, specifying how much weight the
+        previous activation receives in comparison to the current activation.
+        :param sigma: The starting value for the neighborhood size, which is
+        decreased over time. If sigma is None (default), sigma is calculated as
+        ((max(map_dim) / 2) + 0.01), which is generally a good value.
         """
-
-        super().__init__(map_dim, data_dim, learning_rate, lrfunc, nbfunc, sigma, min_max, distance_function)
+        super().__init__(map_dim,
+                         data_dim,
+                         learning_rate,
+                         lrfunc, nbfunc,
+                         sigma, min_max,
+                         distance_function)
         self.alpha = alpha
 
     def _init_prev(self, X):
+        """
+        Initialize the context vector.
 
+        Initializes the context to a safe value at the beginning
+        of training. In this case, this is a (batch * weight_dim * data_dim)
+        matrix.
+
+        :param X: The input data.
+        :return: A (batch * weight_dim * data_dim) matrix.
+        """
         return np.zeros(X.size()[1], self.weight_dim, X.size()[2])
 
     def _example(self, x, influences, **kwargs):
         """
-        A single epoch.
-        :param X: a numpy array of data
-        :param map_radius: The radius at the current epoch, given the learning rate and map size
-        :param learning_rates: The learning rate.
-        :param batch_size: The pytorch size
-        :return: The best matching unit
-        """
+        A single example.
 
-        prev_activation = kwargs['prev_activation']
+        :param X: a numpy array of data, representing a single batch
+        :param influences: The influence at the current epoch,
+        given the learning rate and map size
+        :return: An array representing the difference between
+        weight vectors and the input.
+        """
+        prev = kwargs['prev_activation']
 
         # Get the indices of the Best Matching Units, given the data.
-        activation, difference = self._get_bmus(x, prev_activation=prev_activation)
+        activation, difference = self._get_bmus(x, prev_activation=prev)
         influence, bmu = self._apply_influences(activation, influences)
         self.weights += self._calculate_update(difference, influence).mean(0)
 
@@ -185,71 +271,77 @@ class Recurrent(Sequential):
 
     def _get_bmus(self, x, **kwargs):
         """
-        Gets the best matching units, based on euclidean distance.
-        :param x: The input vector
-        :return: An integer, representing the index of the best matching unit.
-        """
+        Get the best matching units, based on euclidean distance.
 
+        :param x: A batch of data.
+        :return: The activation, and difference between the input and weights.
+        """
         # Differences is the components of the weights subtracted from the weight vector.
         difference_x = self._distance_difference(x, self.weights)
         distances = (1 - self.alpha) * kwargs['prev_activation'] + (self.alpha * difference_x)
 
-        # Distances are squared euclidean norm of differences.
-        # Since euclidean norm is sqrt(sum(square(x)))) we can leave out the sqrt
-        # and avoid doing an extra square.
-        # Axis 2 because we are doing minibatches.
+        # Compute the actual activation through euclidean.
         activation = np.squeeze(np.array([np.sum(np.square(d), 1) for d in distances]), 2)
         return activation, difference_x
 
     def _predict_base(self, X):
         """
-        Predicts distances to some input data.
+        Predict distances to some input data.
 
         :param X: The input data.
         :return: An array of arrays, representing the activation
         each node has to each input.
         """
-
         X = self._create_batches(X, 1)
         X = np.asarray(X, dtype=np.float32)
 
-        distances = []
-
-        # prev_activation = np.squeeze(t.sum(t.pow(self._distance_difference(X[0], self.weights), 2), 2))[None, :]
-        # distances.extend(prev_activation)
-        prev_distance = self._init_prev(X)
+        activations = []
+        prev = self._init_prev(X)
 
         for x in X:
-            prev_activation, prev_distance = self._get_bmus(x, prev_activation=prev_distance)
-            distances.extend(prev_activation)
+            activation, prev_d = self._get_bmus(x, prev_activation=prev)
+            activations.extend(activation)
 
-        return np.array(distances)
+        return np.array(activations)
 
 
 class Recursive(Sequential):
 
-    def __init__(self, map_dim, data_dim, learning_rate, alpha, beta, sigma=None, lrfunc=expo, nbfunc=expo):
+    def __init__(self,
+                 map_dim,
+                 data_dim,
+                 learning_rate,
+                 alpha,
+                 beta,
+                 sigma=None,
+                 lrfunc=expo,
+                 nbfunc=expo):
         """
         A recursive SOM.
 
-        A recursive SOM models sequences through context dependence by not only storing the exemplars in weights,
-        but also storing which exemplars preceded them. Because of this organization, the SOM can recursively
-        "remember" short sequences, which makes it attractive for simple sequence problems, e.g. characters or words.
+        A recursive SOM models sequences through context dependence by not only
+        storing the exemplars in weights, but also storing which exemplars
+        preceded them. Because of this organization, the SOM can recursively
+        "remember" short sequences, which makes it attractive for simple
+        sequence problems, e.g. characters or words.
 
-        :param map_dim: A tuple of map dimensions, e.g. (10, 10) instantiates a 10 by 10 map.
+        :param map_dim: A tuple of map dimensions,
+        e.g. (10, 10) instantiates a 10 by 10 map.
         :param data_dim: The data dimensionality.
-        :param learning_rate: The learning rate, which is decreases according to some function
-        :param lrfunc: The function to use in decreasing the learning rate. The functions are
-        defined in utils. Default is exponential.
-        :param nbfunc: The function to use in decreasing the neighborhood size. The functions
-        are defined in utils. Default is exponential.
-        :param alpha: The influence of the weight vector on the BMU decision
-        :param beta: The influence of the context vector on the BMU decision
-        :param sigma: The starting value for the neighborhood size, which is decreased over time.
-        If sigma is None (default), sigma is calculated as ((max(map_dim) / 2) + 0.01), which is
-        generally a good value.
+        :param learning_rate: The learning rate, which is decreased
+        according to some function.
+        :param lrfunc: The function to use in decreasing the learning rate.
+        The functions are defined in utils. Default is exponential.
+        :param nbfunc: The function to use in decreasing the neighborhood size.
+        The functions are defined in utils. Default is exponential.
+        :param alpha: a float value, specifying how much weight the
+        input value receives in the BMU calculation.
+        :param beta: a float value, specifying how much weight the context
+        receives in the BMU calculation.
+        :param sigma: The starting value for the neighborhood size, which is
+        decreased over time. If sigma is None (default), sigma is calculated as
+        ((max(map_dim) / 2) + 0.01), which is generally a good value.
         """
-
         super().__init__(map_dim,
                          data_dim,
                          learning_rate,
@@ -272,15 +364,14 @@ class Recursive(Sequential):
         A single example.
 
         :param X: a numpy array of data
-        :param map_radius: The radius at the current epoch, given the learning rate and map size
-        :param learning_rates: The learning rate.
-        :param batch_size: The pytorch size
-        :return: The best matching unit
+        :param influences: The influence at the current epoch,
+        given the learning rate and map size
+        :return: A vector describing activation values for each unit.
         """
 
-        prev_activation = kwargs['prev_activation']
+        prev = kwargs['prev_activation']
 
-        activation, diff_x, diff_context = self._get_bmus(x, prev_activation=prev_activation)
+        activation, diff_x, diff_context = self._get_bmus(x, prev_activation=prev)
 
         influence, bmu = self._apply_influences(activation, influences)
         # Update
@@ -292,17 +383,27 @@ class Recursive(Sequential):
 
     def _get_bmus(self, x, **kwargs):
         """
-        Gets the best matching units, based on euclidean distance.
-        :param x: The input vector
-        :return: An integer, representing the index of the best matching unit.
-        """
+        Get the best matching units, based on euclidean distance.
 
-        prev_activation = kwargs['prev_activation']
-        # Differences is the components of the weights subtracted from the weight vector.
+        The euclidean distance between the context vector and context weights
+        and input vector and weights are used to estimate the BMU. The
+        activation of the units is the sum of the distances, weighed by two
+        constants, alpha and beta.
+
+        The exponent of the negative of this value describes the activation
+        of the units. This function is bounded between 0 and 1, where 1 means
+        the unit matches well and 0 means the unit doesn't match at all.
+
+        :param x: A batch of data.
+        :return: The activation, and difference between the input and weights.
+        """
+        prev = kwargs['prev_activation']
+        # Differences is the components of the weights subtracted from
+        # the weight vector.
         difference_x = self._distance_difference(x, self.weights)
-        difference_y = self._distance_difference(prev_activation, self.context_weights)
+        difference_y = self._distance_difference(prev, self.context_weights)
         distance_x = self.distance_function(x, self.weights)
-        distance_y = self.distance_function(prev_activation, self.context_weights)
+        distance_y = self.distance_function(prev, self.context_weights)
 
         activation = np.exp(-(np.multiply(distance_x, self.alpha) + np.multiply(distance_y, self.beta)))
 
@@ -311,14 +412,14 @@ class Recursive(Sequential):
     @classmethod
     def load(cls, path):
         """
-        Loads a recursive SOM from a JSON file.
+        Load a recursive SOM from a JSON file.
+
         You can use this function to load weights of other SOMs.
         If there are no context weights, the context weights will be set to 0.
 
         :param path: The path to the JSON file.
         :return: A RecSOM.
         """
-
         data = json.load(open(path))
 
         weights = data['weights']
@@ -344,7 +445,15 @@ class Recursive(Sequential):
             alpha = 3.0
             beta = 1.0
 
-        s = cls(dimensions, datadim, lr, lrfunc=lrfunc, nbfunc=nbfunc, sigma=sigma, alpha=alpha, beta=beta)
+        s = cls(dimensions,
+                datadim,
+                lr,
+                lrfunc=lrfunc,
+                nbfunc=nbfunc,
+                sigma=sigma,
+                alpha=alpha,
+                beta=beta)
+
         s.weights = weights
         s.context_weights = context_weights
         s.trained = True
@@ -353,12 +462,11 @@ class Recursive(Sequential):
 
     def save(self, path):
         """
-        Saves a SOM to a JSON file.
+        Save a SOM to a JSON file.
 
         :param path: The path to the JSON file that will be created
         :return: None
         """
-
         dicto = {}
         dicto['weights'] = [[float(w) for w in x] for x in self.weights]
         dicto['context_weights'] = [[float(w) for w in x] for x in self.context_weights]
@@ -375,81 +483,122 @@ class Recursive(Sequential):
 
 class Merging(Sequential):
 
-    def __init__(self, map_dim, data_dim, learning_rate, alpha, beta, sigma=None, lrfunc=expo, nbfunc=expo, min_max=np_min, distance_function=euclidean):
+    def __init__(self,
+                 map_dim,
+                 data_dim,
+                 learning_rate,
+                 alpha,
+                 beta,
+                 sigma=None,
+                 lrfunc=expo,
+                 nbfunc=expo,
+                 min_max=np_min,
+                 distance_function=euclidean):
         """
-        A merging som
+        A merging som.
 
-        :param map_dim: A tuple of map dimensions, e.g. (10, 10) instantiates a 10 by 10 map.
+        :param map_dim: A tuple of map dimensions,
+        e.g. (10, 10) instantiates a 10 by 10 map.
         :param data_dim: The data dimensionality.
-        :param learning_rate: The learning rate, which is decreases according to some function
-        :param lrfunc: The function to use in decreasing the learning rate. The functions are
-        defined in utils. Default is exponential.
-        :param nbfunc: The function to use in decreasing the neighborhood size. The functions
-        are defined in utils. Default is exponential.
-        :param alpha: Controls the rate of context dependence, where 0 is low context dependence,
-        and 1 is high context dependence. Should start at low values (e.g. 0.0 to 0.05)
-        :param beta: A float between 1 and 0 specifying the influence of context on previous weights.
-        Static, usually 0.5.
-        :param sigma: The starting value for the neighborhood size, which is decreased over time.
-        If sigma is None (default), sigma is calculated as ((max(map_dim) / 2) + 0.01), which is
-        generally a good value.
+        :param learning_rate: The learning rate, which is decreased
+        according to some function.
+        :param lrfunc: The function to use in decreasing the learning rate.
+        The functions are defined in utils. Default is exponential.
+        :param nbfunc: The function to use in decreasing the neighborhood size.
+        The functions are defined in utils. Default is exponential.
+        :param alpha: Controls the rate of context dependence, where 0 is low
+        context dependence, and 1 is high context dependence. Should start at
+        low values (e.g. 0.0 to 0.05)
+        :param beta: A float between 1 and 0 specifying the influence of
+        context on previous weights. Static, usually 0.5.
+        :param sigma: The starting value for the neighborhood size, which is
+        decreased over time. If sigma is None (default), sigma is calculated as
+        ((max(map_dim) / 2) + 0.01), which is generally a good value.
         """
-
-        super().__init__(map_dim, data_dim, learning_rate, lrfunc, nbfunc, sigma, min_max, distance_function)
+        super().__init__(map_dim,
+                         data_dim,
+                         learning_rate,
+                         lrfunc,
+                         nbfunc,
+                         sigma,
+                         min_max,
+                         distance_function)
 
         self.alpha = alpha
         self.beta = beta
         self.context_weights = np.ones_like(self.weights)
         self.entropy = 0
 
-    def _epoch(self, X, nb_update_counter, lr_update_counter, idx, nb_step, lr_step, show_progressbar):
+    def _epoch(self,
+               X,
+               nb_update_counter,
+               lr_update_counter,
+               idx,
+               nb_step,
+               lr_step,
+               show_progressbar):
         """
         A single epoch.
 
+        This function uses an index parameter which is passed around to see to
+        how many training items the SOM has been exposed globally.
+
+        nb and lr_update_counter hold the indices at which the neighborhood
+        size and learning rates need to be updated.
+        These are therefore also passed around. The nb_step and lr_step
+        parameters indicate how many times the neighborhood
+        and learning rate parameters have been updated already.
+
         :param X: The training data.
-        :param nb_update_counter: The epochs at which to update the neighborhood.
-        :param lr_update_counter: The epochs at which to updat the learning rate.
+        :param nb_update_counter: The indices at which to
+        update the neighborhood.
+        :param lr_update_counter: The indices at which to
+        update the learning rate.
         :param idx: The current index.
         :param nb_step: The current neighborhood step.
         :param lr_step: The current learning rate step.
         :param show_progressbar: Whether to show a progress bar or not.
-        :param context_mask: The context mask.
-        :return:
+        :return: The index, neighborhood step and learning rate step
         """
-
         map_radius = self.nbfunc(self.sigma, nb_step, len(nb_update_counter))
-        learning_rate = self.lrfunc(self.learning_rate, lr_step, len(lr_update_counter))
+        learning_rate = self.lrfunc(self.learning_rate,
+                                    lr_step,
+                                    len(lr_update_counter))
         influences = self._calculate_influence(map_radius) * learning_rate
 
-        prev_activation = self._init_prev(X)
-        bmus = []
+        prev = self._init_prev(X)
 
-        update = False
+        # Iterate over the training data
+        for x in progressbar(X, use=show_progressbar, logger=logger):
 
-        for x in progressbar(X, use=show_progressbar):
-
-            prev_activation = self._example(x, influences, prev_activation=prev_activation)
-            bmus.append(prev_activation)
+            prev = self._example(x,
+                                 influences,
+                                 prev_activation=prev)
 
             if idx in nb_update_counter:
                 nb_step += 1
 
-                map_radius = self.nbfunc(self.sigma, nb_step, len(nb_update_counter))
+                map_radius = self.nbfunc(self.sigma,
+                                         nb_step,
+                                         len(nb_update_counter))
                 logger.info("Updated map radius: {0}".format(map_radius))
-                update = True
+
+                # The map radius has been updated, so the influence
+                # needs to be recalculated
+                influences = self._calculate_influence(map_radius)
+                influences *= learning_rate
 
             if idx in lr_update_counter:
                 lr_step += 1
 
-                learning_rate = self.lrfunc(self.learning_rate, lr_step, len(lr_update_counter))
+                # Reset the influences back to 1
+                influences /= learning_rate
+                learning_rate = self.lrfunc(self.learning_rate,
+                                            lr_step,
+                                            len(lr_update_counter))
                 logger.info("Updated learning rate: {0}".format(learning_rate))
-                update = True
-
-            if update:
-                influences = self._calculate_influence(map_radius) * learning_rate
-                # prev_update = self._entropy(Counter(bmus), prev_update)
-                logging.info("ALPHA: {0}".format(self.alpha))
-                update = False
+                # Recalculate the influences
+                influences *= learning_rate
 
             idx += 1
 
@@ -460,10 +609,9 @@ class Merging(Sequential):
         A single example.
 
         :param X: a numpy array of data
-        :param map_radius: The radius at the current epoch, given the learning rate and map size
-        :param learning_rates: The learning rate.
-        :param batch_size: The pytorch size
-        :return: The activation
+        :param influences: The influence at the current epoch,
+        given the learning rate and map size
+        :return: A vector describing activation values for each unit.
         """
         prev_bmu = self.min_max(kwargs['prev_activation'], 1)[1]
         context = (1 - self.beta) * self.weights[prev_bmu] + self.beta * self.context_weights[prev_bmu]
@@ -479,21 +627,21 @@ class Merging(Sequential):
 
     def _entropy(self, prev_bmus, prev_update):
         """
-        Calculates the entropy of the current activations based on previous activations
-        Recurrent SOMS perform better when their weight-based activation profile
+        Calculate the entropy activation pattern.
+
+        Merging SOMS perform better when their weight-based activation profile
         has high entropy, as small changes in context will then be able to have
         a larger effect.
 
         This is reflected in this function, which increases the importance of
         context by decreasing alpha if the entropy decreases. The function uses
-        a very large momentum term of 0.9 to make sure the entropy does not rise
-        or fall too sharply.
+        a very large momentum term of 0.9 to make sure the entropy does not
+        rise or fall too sharply.
 
         :param prev_bmus: The previous BMUs.
         :param prev_update: The previous update, used as a momentum term.
         :return:
         """
-
         prev_bmus = np.array(list(prev_bmus.values()))
         prev_bmus = prev_bmus / np.sum(prev_bmus)
 
@@ -510,30 +658,31 @@ class Merging(Sequential):
 
     def _get_bmus(self, x, **kwargs):
         """
-        Gets the best matching units, based on euclidean distance.
+        Get the best matching units, based on euclidean distance.
+
         :param x: The input vector
         :return: An integer, representing the index of the best matching unit.
         """
-
-        # Differences is the components of the weights subtracted from the weight vector.
+        # Differences is the components of the weights
+        # subtracted from the weight vector.
         differences_x = self._distance_difference(x, self.weights)
         # Idem for context.
-        differences_y = self._distance_difference(kwargs['prev_activation'], self.context_weights)
+        differences_y = self._distance_difference(kwargs['prev_activation'],
+                                                  self.context_weights)
 
-        # Distances are squared euclidean norm of differences.
-        # Since euclidean norm is sqrt(sum(square(x)))) we can leave out the sqrt
-        # and avoid doing an extra square.
         distances_x = self.distance_function(x, self.weights)
-        distances_y = self.distance_function(kwargs['prev_activation'], self.context_weights)
+        distances_y = self.distance_function(kwargs['prev_activation'],
+                                             self.context_weights)
 
-        # BMU is based on a weighted addition of current and previous activation.
+        # BMU is based on a weighted addition of current and
+        # previous activation.
         activations = np.multiply(distances_x, 1 - self.alpha) + np.multiply(distances_y, self.alpha)
 
         return activations, differences_x, differences_y
 
     def _predict_base(self, X):
         """
-        Predicts distances to some input data.
+        Predict distances to some input data.
 
         :param X: The input data.
         :return: An array of arrays, representing the activation
