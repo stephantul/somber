@@ -109,7 +109,7 @@ class Sequential(Som):
         influences = self._calculate_influence(map_radius) * learning_rate
 
         # Iterate over the training data
-        for x in progressbar(X, use=show_progressbar, logger=logger):
+        for x in progressbar(X, use=show_progressbar):
 
             prev_activation = self._example(x,
                                             influences,
@@ -577,7 +577,7 @@ class Merging(Sequential):
         prev = self._init_prev(X)
 
         # Iterate over the training data
-        for x in progressbar(X, use=show_progressbar, logger=logger):
+        for x in progressbar(X, use=show_progressbar):
 
             prev = self._example(x,
                                  influences,

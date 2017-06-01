@@ -48,24 +48,26 @@ class Som(object):
                  distance_function=euclidean,
                  influence_size=None):
         """
+        A batched Self-Organizing-Map.
 
-
-        :param map_dim: A tuple of map dimensions, e.g. (10, 10) instantiates a 10 by 10 map.
-        :param data_dim: The data dimensionality.
-        :param learning_rate: The learning rate, which is decreases according to some function
-        :param lrfunc: The function to use in decreasing the learning rate. The functions are
-        defined in utils. Default is exponential.
-        :param nbfunc: The function to use in decreasing the neighborhood size. The functions
-        are defined in utils. Default is exponential.
-        :param sigma: The starting value for the neighborhood size, which is decreased over time.
-        If sigma is None (default), sigma is calculated as ((max(map_dim) / 2) + 0.01), which is
-        generally a good value.
+        :param map_dim: A tuple describing the MAP size.
+        :param data_dim: The dimensionality of the input matrix.
+        :param learning_rate: The learning rate.
+        :param sigma: The neighborhood factor.
+        :param lrfunc: The function used to decrease the learning rate.
+        :param nbfunc: The function used to decrease the neighborhood
+        :param min_max: The function used to determine the winner.
+        :param distance_function: The function used to do distance calculation.
+        Euclidean by default.
+        :param influence_size: The size of the influence matrix.
+        Usually reverts to data_dim, but can be
+        larger.
         """
-        
         if sigma is not None:
             self.sigma = sigma
         else:
-            # Add small constant to sigma to prevent divide by zero for maps of size 2.
+            # Add small constant to sigma to prevent
+            # divide by zero for maps of size 2.
             self.sigma = (max(map_dim) / 2.0) + 0.01
 
         self.distance_function = distance_function
@@ -101,28 +103,38 @@ class Som(object):
         else:
             self.influence_size = influence_size
 
-    def train(self, X, num_epochs=10, total_updates=1000, stop_lr_updates=1.0, stop_nb_updates=1.0, batch_size=100, show_progressbar=False):
+    def train(self,
+              X,
+              num_epochs=10,
+              total_updates=1000,
+              stop_lr_updates=1.0,
+              stop_nb_updates=1.0,
+              batch_size=100,
+              show_progressbar=False):
         """
-        Fits the SOM to some data.
+        Fit the SOM to some data.
+
         The updates correspond to the number of updates to the parameters
-        (i.e. learning rate, neighborhood, not weights!) to perform during training.
+        (i.e. learning rate, neighborhood, not weights!)
+        to perform during training.
 
         In general, 1000 updates will do for most learning problems.
 
         :param X: the data on which to train.
         :param num_epochs: the number of epochs for which to train.
-        :param total_updates: The number of updates to the parameters to do during training.
-        :param stop_lr_updates: A fraction, describing over which portion of the training data
-        the learning rate should decrease. If the total number of updates, for example
-        is 1000, and stop_updates = 0.5, 1000 updates will have occurred after half of the examples.
+        :param total_updates: The number of updates to the parameters to do
+        during training.
+        :param stop_lr_updates: A fraction, describing over which portion of
+        the training data the learning rate should decrease. If the total
+        number of updates, for example is 1000, and stop_updates = 0.5,
+        1000 updates will have occurred after half of the examples.
         After this period, no updates of the parameters will occur.
-        :param stop_nb_updates: A fraction, describing over which portion of the training data
-        the neighborhood should decrease.
-        :param batch_size: the pytorch size
+        :param stop_nb_updates: A fraction, describing over which portion of
+        the training data the neighborhood should decrease.
+        :param batch_size: the batch size
         :param show_progressbar: whether to show the progress bar.
         :return: None
         """
-
         if not self.trained:
             min_ = np.min(X, axis=0)
             random = np.random.rand(self.weight_dim).reshape((self.weight_dim, 1))
@@ -141,9 +153,14 @@ class Som(object):
         step_size_nb = max((train_length * stop_nb_updates) // total_updates, 1)
 
         # Precalculate the number of updates.
-        lr_update_counter = np.arange(step_size_lr, (train_length * stop_lr_updates) + step_size_lr, step_size_lr)
-        nb_update_counter = np.arange(step_size_nb, (train_length * stop_nb_updates) + step_size_nb, step_size_nb)
+        # Precalculate the number of updates.
+        lr_update_counter = np.arange(step_size_lr,
+                                      (train_length * stop_lr_updates) + step_size_lr,
+                                      step_size_lr)
 
+        nb_update_counter = np.arange(step_size_nb,
+                                      (train_length * stop_nb_updates) + step_size_nb,
+                                      step_size_nb)
         start = time.time()
 
         # Train
@@ -167,23 +184,41 @@ class Som(object):
 
         logger.info("Total train time: {0}".format(time.time() - start))
 
-    def _epoch(self, X, nb_update_counter, lr_update_counter, idx, nb_step, lr_step, show_progressbar):
+    def _epoch(self,
+               X,
+               nb_update_counter,
+               lr_update_counter,
+               idx,
+               nb_step,
+               lr_step,
+               show_progressbar):
         """
         A single epoch.
 
+        This function uses an index parameter which is passed around to see to
+        how many training items the SOM has been exposed globally.
+
+        nb and lr_update_counter hold the indices at which the neighborhood
+        size and learning rates need to be updated.
+        These are therefore also passed around. The nb_step and lr_step
+        parameters indicate how many times the neighborhood
+        and learning rate parameters have been updated already.
+
         :param X: The training data.
-        :param nb_update_counter: The epochs at which to update the neighborhood.
-        :param lr_update_counter: The epochs at which to updat the learning rate.
+        :param nb_update_counter: The indices at which to
+        update the neighborhood.
+        :param lr_update_counter: The indices at which to
+        update the learning rate.
         :param idx: The current index.
         :param nb_step: The current neighborhood step.
         :param lr_step: The current learning rate step.
         :param show_progressbar: Whether to show a progress bar or not.
-        :param context_mask: The context mask.
-        :return:
+        :return: The index, neighborhood step and learning rate step
         """
-
         map_radius = self.nbfunc(self.sigma, nb_step, len(nb_update_counter))
-        learning_rate = self.lrfunc(self.learning_rate, lr_step, len(lr_update_counter))
+        learning_rate = self.lrfunc(self.learning_rate,
+                                    lr_step,
+                                    len(lr_update_counter))
         influences = self._calculate_influence(map_radius) * learning_rate
 
         # Iterate over the training data
@@ -194,19 +229,24 @@ class Som(object):
             if idx in nb_update_counter:
                 nb_step += 1
 
-                map_radius = self.nbfunc(self.sigma, nb_step, len(nb_update_counter))
+                map_radius = self.nbfunc(self.sigma,
+                                         nb_step,
+                                         len(nb_update_counter))
                 logger.info("Updated map radius: {0}".format(map_radius))
 
                 # The map radius has been updated, so the influence
                 # needs to be recalculated
-                influences = self._calculate_influence(map_radius) * learning_rate
+                influences = self._calculate_influence(map_radius)
+                influences *= learning_rate
 
             if idx in lr_update_counter:
                 lr_step += 1
 
                 # Reset the influences back to 1
                 influences /= learning_rate
-                learning_rate = self.lrfunc(self.learning_rate, lr_step, len(lr_update_counter))
+                learning_rate = self.lrfunc(self.learning_rate,
+                                            lr_step,
+                                            len(lr_update_counter))
                 logger.info("Updated learning rate: {0}".format(learning_rate))
                 # Recalculate the influences
                 influences *= learning_rate
@@ -217,16 +257,18 @@ class Som(object):
 
     def _create_batches(self, X, batch_size):
         """
-        Creates batches out of a sequential piece of data.
+        Create batches out of a sequence of data.
+
         Assumes ndim(X) == 2.
 
-        This function will append zeros to the end of your data to make all batches even-sized.
+        This function will append zeros to the end of your data to ensure that
+        all batches are even-sized.
 
-        :param X: A numpy array, representing your input data. Must have 2 dimensions.
-        :param batch_size: The desired pytorch size.
+        :param X: A numpy array, representing your input data.
+        Must have 2 dimensions.
+        :param batch_size: The desired batch size.
         :return: A batched version of your data.
         """
-
         self.progressbar_interval = 1
         self.progressbar_mult = batch_size
 
@@ -241,7 +283,6 @@ class Som(object):
         given the learning rate and map size
         :return: A vector describing activation values for each unit.
         """
-
         activation, difference_x = self._get_bmus(x)
         influence, bmu = self._apply_influences(activation, influences)
         self.weights += self._calculate_update(difference_x, influence).mean(0)
@@ -250,7 +291,7 @@ class Som(object):
 
     def _distance_difference(self, x, weights):
         """
-        Calculates the difference between an input and all the weights.
+        Calculate the difference between an input and all the weights.
 
         :param x: The input.
         :param weights: An array of weights.
@@ -260,7 +301,7 @@ class Som(object):
 
     def _predict_base(self, X):
         """
-        Predicts distances to some input data.
+        Predict distances to some input data.
 
         This function should not be directly used.
 
@@ -268,7 +309,6 @@ class Som(object):
         :return: An array of arrays, representing the activation
         each node has to each input.
         """
-
         X = self._create_batches(X, 1)
 
         activations = []
@@ -281,61 +321,67 @@ class Som(object):
 
     def _apply_influences(self, activations, influences):
         """
-        First calculates the BMU.
-        Then gets the appropriate influence from the neighborhood, given the BMU
+        Calculate the BMU using min_max, and get the appropriate influences.
+
+        Then gets the appropriate influence from the neighborhood,
+        given the BMU
 
         :param activations: A Numpy array of distances.
-        :param influences: A (map_dim, map_dim, data_dim) array describing the influence
-        each node has on each other node.
+        :param influences: A (map_dim, map_dim, data_dim) array
+        describing the influence each node has on each other node.
         :return: The influence given the bmu, and the index of the bmu itself.
         """
-
         bmu = self.min_max(activations, 1)[1]
         return influences[bmu], bmu
 
     def _calculate_influence(self, sigma):
         """
-        Pre-calculates the influence for a given value of sigma.
+        Pre-calculate the influence for a given value of sigma.
 
         The neighborhood has size map_dim * map_dim, so for a 30 * 30 map,
-        the neighborhood will be size (900, 900).
-        It is then duplicated influence_size times, and reshaped into an
+        the neighborhood will be size (900, 900). It is then duplicated
+        influence_size times, and reshaped into an
         (map_dim, map_dim, influence_size) array.
         This is done to facilitate fast calculation in subsequent steps.
 
         :param sigma: The neighborhood value.
         :return: The neighborhood, reshaped into an array
         """
-
-        neighborhood = np.exp(-self.distance_grid / (2.0 * sigma ** 2)).reshape(self.weight_dim, self.weight_dim)
-        return np.array([neighborhood] * self.influence_size).transpose((1, 2, 0))
+        neighborhood = np.exp(-self.distance_grid / (2.0 * sigma ** 2))
+        # Reshape neighborhood
+        neighborhood = neighborhood.reshape(self.weight_dim, self.weight_dim)
+        # Repeat neighborhood self.influence_size times
+        neighborhood = neighborhood.transpose((1, 2, 0))
+        return np.array([neighborhood] * self.influence_size)
 
     def _initialize_distance_grid(self):
         """
-        Initializes the distance grid by calls to _grid_dist.
+        Initialize the distance grid by calls to _grid_dist.
 
         :return:
         """
-
         p = [self._grid_distance(i).reshape(1, self.weight_dim) for i in range(self.weight_dim)]
         return np.array(p)
 
     def _grid_distance(self, index):
         """
-        Calculates the distance grid for a single index position. This is pre-calculated for
-        fast neighborhood calculations later on (see _calc_influence).
+        Calculate the distance grid for a single index position.
+
+        This is pre-calculated for fast neighborhood calculations
+        later on (see _calc_influence).
 
         :param index: The index for which to calculate the distances.
         :return: A flattened version of the distance array.
         """
-
         width, height = self.map_dimensions
 
         row = index // width
         column = index % width
 
-        x = np.abs(np.arange(0, self.weight_dim).reshape(self.map_dimensions) % width - row)
-        y = np.abs(np.arange(0, self.weight_dim).reshape(self.map_dimensions) % height - column).transpose(1, 0)
+        # Fast way to construct distance matrix
+        f = np.arange(0, self.weight_dim).view(self.map_dimensions)
+        x = np.abs(f % width - row)
+        y = np.abs(f % height - column).transpose(1, 0)
 
         distance = x + y
 
@@ -343,16 +389,14 @@ class Som(object):
 
     def map_weights(self):
         """
-        Retrieves the grid as a list of lists of weights.
+        Retrieve the grid as a list of lists of weights.
 
-        For easy visualization using matplotlib.
-
-        :return: A three-dimensional Numpy array of values (width, height, data_dim)
+        :return: A three-dimensional Numpy array of values.
         """
-
         width, height = self.map_dimensions
-
-        return np.array(self.weights.view((width, height, self.data_dim)).transpose(1, 0).tolist())
+        # Reshape to appropriate dimensions
+        view = self.weights.reshape((width, height, self.data_dim))
+        return view.T
 
     @classmethod
     def load(cls, path):
@@ -401,28 +445,25 @@ class Som(object):
 
     def quant_error(self, X):
         """
-        Calculates the quantization error.
+        Calculate the quantization error.
 
-        Calculates the quantization error by calculating the euclidean
-        distance between each input datum and the weights and then
-        taking the minimum.
+        Find the the minimum euclidean distance between the units and
+        some input.
 
         :param X: Input data.
         :return: A vector of numbers, representing the quantization error
         for each data point.
         """
-
         dist = self._predict_base(X)
         return self.min_max(dist, 1)[0]
 
     def predict(self, X):
         """
-        Predict the BMU for each input datum.
+        Predict the BMU for each input data.
 
         :param X: Input data.
         :return: The index of the bmu which best describes the input data.
         """
-
         dist = self._predict_base(X)
         return self.min_max(dist, 1)[1]
 
@@ -442,7 +483,6 @@ class Som(object):
         but costs more memory.
         :return: The receptive field of each neuron.
         """
-
         assert len(X) == len(identities)
 
         receptive_fields = defaultdict(list)
@@ -474,17 +514,17 @@ class Som(object):
 
     def invert_projection(self, X, identities):
         """
-        Calculate the inverted projection of a SOM by associating each
-        unit with the input datum that gives the closest match.
+        Calculate the inverted projection.
 
+        The inverted projectio of a SOM is created by association each weight
+        with the input datum which matches it the most.
         Works best for symbolic (instead of continuous) input data.
 
-        :param X: An array of input data.
+        :param X: Input data
         :param identities: The identities for each
         input datum, must be same length as X
         :return: A numpy array with identities, the shape of the map.
         """
-
         if len(X) != len(identities):
             raise ValueError("X and identities are not the same length: {0} and {1}".format(len(X), len(identities)))
 
@@ -518,7 +558,7 @@ class Som(object):
 
     def _calculate_update(self, difference_vector, influence):
         """
-        Multiplies the difference vector with the influence vector
+        Multiply the difference vector with the influence vector.
 
         The influence vector is chosen based on the BMU, so that the update
         done to the every weight node is proportional to its distance from the
@@ -529,8 +569,9 @@ class Som(object):
         In this case (X - w) has been precomputed for speed, in the function
         _get_bmus.
 
-        :param difference_vector: The difference between the input and some weights.
-        :param influence: The influence the result has on each unit, depending on distance.
-        Already includes the learning rate.
+        :param difference_vector: The difference between the input and
+        weights.
+        :param influence: The influence the result has on each unit,
+        depending on distance. Already includes the learning rate.
         """
         return difference_vector * influence
