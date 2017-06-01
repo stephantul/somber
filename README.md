@@ -23,7 +23,7 @@ Unlike most sequence-based neural network packages, SOMBER doesn't use batches o
 
 This makes switching and comparing between non-sequential SOM and the sequential SOMs easy, as the SOM itself will decide whether to pay attention to what came before, and how it will pay attention to what came before.
 
-A consequence of representing everything as a single sequence is that the sequential SOMs assume everything in the sequence depends on what comes before, which might be unsuitable for your problem. This can be remedied using the `reset_context_symbol` function, which allows you to reset the context for given symbols (e.g. spaces between words, periods, newlines between sentences). Example below.
+A consequence of representing everything as a single sequence is that the sequential SOMs assume everything in the sequence depends on what comes before, which might be unsuitable for your problem. 
 
 ### Examples
 
@@ -35,7 +35,7 @@ The color dataset comes from this nice [blog]( https://codesachin.wordpress.com/
 ```python3
 import numpy as np
 
-from somber.som import Som
+from somber.batch.som import Som
 
 X = np.array(
      [[0., 0., 0.],
@@ -78,33 +78,6 @@ mapped = s.map_weights()
 import matplotlib.pyplot as plt
 
 plt.imshow(mapped)
-
-```
-
-#### Using context reset
-
-In this example, I assume you have some text, encoded as one-hot vectors
-of alphabetic characters + space (hence dim == 27)
-
-```python3
-from somber.recurrent import Recursive
-from somber.utils import reset_context_symbol
-
-# Some array of characters
-text = "i am a nice dog and like to play in the yard"
-
-# Reset the context on space symbol
-reset = reset_context_symbol(text, [" "])
-
-# This is a dummy vectorize operation, not implemented!
-X = vectorize(text)
-
-r = Recursive((10, 10), 27, 0.3, alpha=1.0, beta=1.0)
-
-# Now, context will be reset at the indices corresponding to the spaces.
-# Therefore, the characters after the space are conditionally independent
-# from the characters before the space.
-r.train(X, context_mask=reset)
 
 ```
 
