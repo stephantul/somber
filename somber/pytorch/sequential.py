@@ -114,9 +114,9 @@ class Sequential(Som):
                              mult=self.progressbar_mult,
                              idx_interval=self.progressbar_interval):
 
-            prev_activation = self._example(x,
-                                            influences,
-                                            prev_activation=prev_activation)
+            prev_activation = self.forward(x,
+                                           influences,
+                                           prev_activation=prev_activation)
 
             if idx in nb_update_counter:
                 nb_step += 1
@@ -170,7 +170,7 @@ class Sequential(Som):
         # Transposes it to (len(X) / batch_size, batch_size, data_dim)
         return X.transpose((1, 0, 2))
 
-    def forward(self, x, **kwargs):
+    def activation(self, x, **kwargs):
 
         pass
 
@@ -190,7 +190,7 @@ class Sequential(Som):
         prev = self._init_prev(X)
 
         for x in X:
-            prev = self.forward(x, prev_activation=prev)
+            prev = self.activation(x, prev_activation=prev)
             activations.extend(prev)
 
         return t.stack(activations)
@@ -250,7 +250,7 @@ class Recursive(Sequential):
         self.alpha = self.alpha
         self.beta = self.beta
 
-    def _example(self, x, influences, **kwargs):
+    def forward(self, x, influences, **kwargs):
         """
         A single example.
 
@@ -261,8 +261,8 @@ class Recursive(Sequential):
         """
         prev = kwargs['prev_activation']
 
-        activation = self.forward(x,
-                                  prev_activation=prev)
+        activation = self.activation(x,
+                                     prev_activation=prev)
 
         self.backward(x, activation, influences, prev_activation=prev)
 
@@ -285,7 +285,7 @@ class Recursive(Sequential):
         res = self._calculate_update(prev, self.context_weights, influence).mean(0)
         self.context_weights += t.squeeze(res)
 
-    def forward(self, x, **kwargs):
+    def activation(self, x, **kwargs):
         """
         Get the best matching units, based on euclidean distance.
 
@@ -479,9 +479,9 @@ class Merging(Sequential):
                              mult=self.progressbar_mult,
                              idx_interval=self.progressbar_interval):
 
-            prev = self._example(x,
-                                 influences,
-                                 prev_activation=prev)
+            prev = self.forward(x,
+                                influences,
+                                prev_activation=prev)
 
             if idx in nb_update_counter:
                 nb_step += 1
@@ -512,7 +512,7 @@ class Merging(Sequential):
 
         return idx, nb_step, lr_step
 
-    def _example(self, x, influences, **kwargs):
+    def forward(self, x, influences, **kwargs):
         """
         A single example.
 
@@ -525,7 +525,7 @@ class Merging(Sequential):
         prev = kwargs['prev_activation']
 
         # Get the indices of the Best Matching Units, given the data.
-        activation = self.forward(x, prev_activation=prev)
+        activation = self.activation(x, prev_activation=prev)
         self.backward(x, influences, activation, prev_activation=prev)
 
         return activation
@@ -570,7 +570,7 @@ class Merging(Sequential):
 
         return update
 
-    def forward(self, x, **kwargs):
+    def activation(self, x, **kwargs):
         """
         Get the best matching units, based on euclidean distance.
 
@@ -610,7 +610,7 @@ class Merging(Sequential):
 
         for x in X:
             prev_activation = self.weights[self.min_max(prev_activation, 1)[1].t()[0]]
-            prev_activation = self.forward(x, prev_activation=prev_activation)
+            prev_activation = self.activation(x, prev_activation=prev_activation)
             distances.extend(prev_activation)
 
         return t.stack(distances)

@@ -2,6 +2,8 @@ import logging
 import time
 import numpy as np
 import torch as t
+import torch.nn as nn
+from torch.autograd import Variable
 import json
 
 from ..utils import progressbar, expo, linear
@@ -25,14 +27,14 @@ def euclidean(x, weights):
     w_norm = t.sum(t.pow(weights, 2), dim=1)
     dotted = t.mm(t.mul(x, 2), weights.t())
 
-    res = t.mm(m_norm, t.ones((1, w_norm.size()[0])))
-    res += t.mm(t.ones((m_norm.size()[0], 1)), w_norm.t())
-    res -= dotted
+    res = t.mm(m_norm, nn.Parameter(t.ones((1, w_norm.size()[0]))))
+    res.add(t.mm(nn.Parameter(t.ones((m_norm.size()[0], 1))), w_norm.t()))
+    res.sub(dotted)
 
     return res
 
 
-class Som(object):
+class Som(nn.Module):
     """
     This is the batched version of the basic SOM class.
     """
@@ -87,7 +89,7 @@ class Som(object):
         # Initializing to more appropriate values given the dataset
         # will probably give faster convergence.
 
-        self.weights = t.zeros(self.weight_dim, data_dim)
+        self.weights = t.nn.Parameter(t.zeros(self.weight_dim, data_dim), requires_grad=False)
         self.data_dim = data_dim
 
         # The function used to diminish the learning rate.
@@ -143,13 +145,13 @@ class Som(object):
             min_ = np.min(X, axis=0)
             random = np.random.rand(self.weight_dim).reshape((self.weight_dim, 1))
             temp = np.outer(random, np.abs(np.max(X, axis=0) - min_))
-            self.weights = t.from_numpy(np.asarray(min_ + temp, dtype=np.float32))
+            self.weights = nn.Parameter(t.from_numpy(np.asarray(min_ + temp, dtype=np.float32)), requires_grad=False)
 
         # The train length
         train_length = (len(X) * num_epochs) // batch_size
 
         X = self._create_batches(X, batch_size)
-        X = t.from_numpy(np.asarray(X, dtype=np.float32))
+        X = Variable(t.from_numpy(np.asarray(X, dtype=np.float32)), volatile=True)
 
         # The step size is the number of items between rough epochs.
         # We use len instead of shape because len also works with np.flatiter
@@ -157,13 +159,13 @@ class Som(object):
         step_size_nb = max((train_length * stop_nb_updates) // total_updates, 1)
 
         # Precalculate the number of updates.
-        lr_update_counter = np.arange(step_size_lr,
+        lr_update_counter = set(np.arange(step_size_lr,
                                       (train_length * stop_lr_updates) + step_size_lr,
-                                      step_size_lr, dtype=np.int)
+                                      step_size_lr, dtype=np.int).tolist())
 
-        nb_update_counter = np.arange(step_size_nb,
+        nb_update_counter = set(np.arange(step_size_nb,
                                       (train_length * stop_nb_updates) + step_size_nb,
-                                      step_size_nb, dtype=np.int)
+                                      step_size_nb, dtype=np.int).tolist())
 
         start = time.time()
 
@@ -236,7 +238,7 @@ class Som(object):
                              mult=self.progressbar_mult,
                              idx_interval=self.progressbar_interval):
 
-            self._example(x, influences)
+            self.forward(x, influences)
 
             if idx in nb_update_counter:
                 nb_step += 1
@@ -287,7 +289,7 @@ class Som(object):
         max_x = int(np.ceil(X.shape[0] / batch_size))
         return np.resize(X, (max_x, batch_size, X.shape[1]))
 
-    def _example(self, x, influences, **kwargs):
+    def forward(self, x, influences, **kwargs):
         """
         A single example.
 
@@ -297,9 +299,43 @@ class Som(object):
         :return: An array representing the difference between
         weight vectors and the input.
         """
-        activation = self.forward(x)
-        self.backward(x, activation, influences)
+        # update = nn.Parameter(t.zeros(self.weight_dim,), requires_grad=False)
+        activation = self.activation(x)
+        self.weights.add(self.backward(x, activation, influences))
         return activation
+
+    def activation(self, x):
+        """
+        Get the best matching units, based on euclidean distance.
+
+        :param x: The input vector
+        :return: The activations, and
+        the differences between the input and the weights, which can be
+        reused in the update calculation.
+        """
+        activations = self.distance_function(x, self.weights)
+        return activations
+
+    def _calculate_update(self, x, weights, influence):
+        """
+        Multiply the difference vector with the influence vector.
+
+        The influence vector is chosen based on the BMU, so that the update
+        done to the every weight node is proportional to its distance from the
+        BMU.
+
+        Implicitly uses Oja's Rule: delta_W = alpha * (X - w)
+
+        In this case (X - w) has been precomputed for speed, in the function
+        _get_bmus.
+
+        :param x: The input vector
+        :param weights: The weights
+        :param influence: The influence the result has on each unit,
+        depending on distance. Already includes the learning rate.
+        """
+
+        return self._distance_difference(x, weights) * influence
 
     def backward(self, x, activation, influences, **kwargs):
         """
@@ -312,8 +348,8 @@ class Som(object):
         :return: None
         """
 
-        influence, bmu = self._apply_influences(activation, influences)
-        self.weights += self._calculate_update(x, self.weights, influence).mean(0)
+        influence = self._apply_influences(activation, influences)
+        return self._calculate_update(x, self.weights, influence).mean(0)
 
     def _distance_difference(self, x, weights):
         """
@@ -323,8 +359,10 @@ class Som(object):
         :param weights: An array of weights.
         :return: A vector of differences.
         """
-        p = t.ones(1, weights.size()[0])
-        return t.stack([v[:, None].mm(p).t() - weights for v in x])
+        p = x.unsqueeze(0).repeat(100, 1, 1).transpose(0, 1)
+        w = weights.unsqueeze(0).expand_as(p)
+
+        return p - w
 
     def _predict_base(self, X):
         """
@@ -342,7 +380,7 @@ class Som(object):
         activations = []
 
         for x in X:
-            activation = self.forward(x)
+            activation = self.activation(x)
             activations.extend(activation)
 
         return t.stack(activations)
@@ -360,7 +398,7 @@ class Som(object):
         :return: The influence given the bmu, and the index of the bmu itself.
         """
         bmu = self.min_max(activations, 1)[1].t()[0]
-        return influences[bmu], bmu
+        return influences[bmu.data]
 
     def _calculate_influence(self, sigma):
         """
@@ -376,13 +414,11 @@ class Som(object):
         :return: The neighborhood, reshaped into an array
         """
         neighborhood = t.exp(-self.distance_grid / (2.0 * sigma ** 2))
-        # Reshape neighborhood
-        neighborhood = neighborhood.view(self.weight_dim, self.weight_dim)
-        # Repeat neighborhood self.influence_size times
-        neighborhood = t.stack([neighborhood] * self.influence_size)
 
+        # Repeat neighborhood self.influence_size times
+        neighborhood = neighborhood.repeat(self.influence_size, 1, 1).transpose(2, 0)
         # Awkward transpose
-        return neighborhood.transpose(0, 2).transpose(0, 1)
+        return nn.Parameter(neighborhood, requires_grad=False)
 
     def _initialize_distance_grid(self):
         """
@@ -390,8 +426,8 @@ class Som(object):
 
         :return:
         """
-        p = [self._grid_distance(i).view(1, self.weight_dim) for i in range(self.weight_dim)]
-        return t.stack(p)
+        p = t.stack([self._grid_distance(i).view(self.weight_dim) for i in range(self.weight_dim)])
+        return p.view((self.weight_dim, self.weight_dim))
 
     def _grid_distance(self, index):
         """
@@ -572,35 +608,3 @@ class Som(object):
             node_match.append(names[np.argmin(distances)])
 
         return np.array(node_match)
-
-    def forward(self, x):
-        """
-        Get the best matching units, based on euclidean distance.
-
-        :param x: The input vector
-        :return: The activations, and
-        the differences between the input and the weights, which can be
-        reused in the update calculation.
-        """
-        activations = self.distance_function(x, self.weights)
-        return activations
-
-    def _calculate_update(self, x, weights, influence):
-        """
-        Multiply the difference vector with the influence vector.
-
-        The influence vector is chosen based on the BMU, so that the update
-        done to the every weight node is proportional to its distance from the
-        BMU.
-
-        Implicitly uses Oja's Rule: delta_W = alpha * (X - w)
-
-        In this case (X - w) has been precomputed for speed, in the function
-        _get_bmus.
-
-        :param x: The input vector
-        :param weights: The weights
-        :param influence: The influence the result has on each unit,
-        depending on distance. Already includes the learning rate.
-        """
-        return self._distance_difference(x, weights) * influence
