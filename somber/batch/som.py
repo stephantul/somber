@@ -3,8 +3,8 @@ import time
 
 import json
 
-from ..utils import progressbar
-from functools import reduce, partial
+from ..utils import progressbar, expo, linear, np_min, np_max
+from functools import reduce
 from collections import Counter, defaultdict
 
 from somber import flags
@@ -17,7 +17,7 @@ else:
 
 logger = logging.getLogger(__name__)
 
-@profile
+
 def euclidean(x, weights):
     """
     batched version of the euclidean distance.
@@ -36,55 +36,6 @@ def euclidean(x, weights):
     res -= dotted
 
     return res
-
-
-def np_minmax(func1, func2, X, axis=None):
-
-    if axis is None:
-        return func1(X)
-    else:
-        return func1(X, axis), func2(X, axis)
-
-np_min = partial(np_minmax, np.min, np.argmin)
-np_max = partial(np_minmax, np.max, np.argmax)
-
-
-def expo(value, current_step, total_steps):
-    """
-    Decrease a value X_0 according to an exponential function.
-
-    Lambda is equal to (-2.5 * (current_step / total_steps))
-
-    :param value: The original value.
-    :param current_step: The current timestep.
-    :param total_steps: The maximum number of steps.
-    :return:
-    """
-    return value * np.exp(-2.5 * (current_step / total_steps))
-
-
-def static(value, current_step, total_steps):
-    """
-    Static function: nothing changes.
-
-    :param value: the value
-    :return:
-    """
-    return value
-
-
-def linear(value, current_step, total_steps):
-    """
-    Decrease a value X_0 according to a linear function.
-
-    :param value: The original value.
-    :param current_step: The current timestep.
-    :param total_steps: The maximum number of steps.
-    :return:
-    """
-    return (value * (total_steps - current_step) / total_steps) + 0.01
-
-
 
 
 class Som(object):
@@ -333,7 +284,6 @@ class Som(object):
 
         return np.resize(X, (int(np.ceil(X.shape[0] / batch_size)), batch_size, X.shape[1]))
 
-    @profile
     def _example(self, x, influences, **kwargs):
         """
         A single example.
@@ -349,6 +299,15 @@ class Som(object):
         return activation
 
     def backward(self, x, influences, activation, **kwargs):
+        """
+        Backward pass through the network, including update.
+
+        :param x: The input data
+        :param influences: The influences at the current time-step
+        :param activation: The activation at the output
+        :param kwargs:
+        :return: None
+        """
 
         influence, bmu = self._apply_influences(activation, influences)
         np.add(self.weights, self._calculate_update(x, self.weights, influence).mean(0))

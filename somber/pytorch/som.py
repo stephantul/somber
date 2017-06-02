@@ -4,7 +4,7 @@ import numpy as np
 import torch as t
 import json
 
-from ..utils import expo, linear, progressbar
+from ..utils import progressbar, expo, linear
 from functools import reduce
 from collections import Counter, defaultdict
 
@@ -302,6 +302,15 @@ class Som(object):
         return activation
 
     def backward(self, x, activation, influences, **kwargs):
+        """
+        Backward pass through the network, including update.
+
+        :param x: The input data
+        :param influences: The influences at the current time-step
+        :param activation: The activation at the output
+        :param kwargs:
+        :return: None
+        """
 
         influence, bmu = self._apply_influences(activation, influences)
         self.weights += self._calculate_update(x, self.weights, influence).mean(0)

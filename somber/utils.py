@@ -5,8 +5,54 @@ import numpy as np
 from functools import partial
 
 
+def np_minmax(func1, func2, X, axis=None):
+
+    if axis is None:
+        return func1(X)
+    else:
+        return func1(X, axis), func2(X, axis)
+
+np_min = partial(np_minmax, np.min, np.argmin)
+np_max = partial(np_minmax, np.max, np.argmax)
+
+
+def expo(value, current_step, total_steps):
+    """
+    Decrease a value X_0 according to an exponential function.
+
+    Lambda is equal to (-2.5 * (current_step / total_steps))
+
+    :param value: The original value.
+    :param current_step: The current timestep.
+    :param total_steps: The maximum number of steps.
+    :return:
+    """
+    return value * np.exp(-2.5 * (current_step / total_steps))
+
+
+def static(value, current_step, total_steps):
+    """
+    Static function: nothing changes.
+
+    :param value: the value
+    :return:
+    """
+    return value
+
+
+def linear(value, current_step, total_steps):
+    """
+    Decrease a value X_0 according to a linear function.
+
+    :param value: The original value.
+    :param current_step: The current timestep.
+    :param total_steps: The maximum number of steps.
+    :return:
+    """
+    return (value * (total_steps - current_step) / total_steps) + 0.01
+
+
 def progressbar(target,
-                logger=None,
                 width=30,
                 interval=0.2,
                 idx_interval=10,

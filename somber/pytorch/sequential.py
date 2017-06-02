@@ -4,7 +4,7 @@ import json
 import torch as t
 
 from .som import Som, euclidean
-from ..utils import expo, progressbar, linear
+from ..utils import progressbar, linear, expo
 from functools import reduce
 
 
@@ -269,6 +269,15 @@ class Recursive(Sequential):
         return activation
 
     def backward(self, x, activation, influences, **kwargs):
+        """
+        Backward pass through the network, including update.
+
+        :param x: The input data
+        :param influences: The influences at the current time-step
+        :param activation: The activation at the output
+        :param kwargs:
+        :return: None
+        """
 
         prev = kwargs['prev_activation']
         influence, bmu = self._apply_influences(activation, influences)

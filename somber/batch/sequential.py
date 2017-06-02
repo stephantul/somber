@@ -3,7 +3,7 @@ import json
 from somber import flags
 
 from .som import Som, euclidean
-from ..utils import expo, progressbar, linear, np_min, np_max
+from ..utils import progressbar, expo, linear, np_min, np_max
 from functools import reduce
 
 if flags.FLAGS["gpu"] is not None:
@@ -267,12 +267,20 @@ class Recursive(Sequential):
         prev = kwargs['prev_activation']
 
         activation = self.forward(x, prev_activation=prev)
-
-        self.backward(x, influences, prev)
+        self.backward(x, influences, activation, previous_activation=prev)
 
         return activation
 
     def backward(self, x, influences, activation, **kwargs):
+        """
+        Backward pass through the network, including update.
+
+        :param x: The input data
+        :param influences: The influences at the current time-step
+        :param activation: The activation at the output
+        :param kwargs:
+        :return: None
+        """
 
         prev = kwargs['previous_activation']
         influence, bmu = self._apply_influences(activation, influences)
@@ -523,6 +531,15 @@ class Merging(Sequential):
         return activation
 
     def backward(self, x, influences, activation, **kwargs):
+        """
+        Backward pass through the network, including update.
+
+        :param x: The input data
+        :param influences: The influences at the current time-step
+        :param activation: The activation at the output
+        :param kwargs:
+        :return: None
+        """
 
         prev_bmu = self.min_max(kwargs['prev_activation'], 1)[1]
         context = (1 - self.beta) * self.weights[prev_bmu] + self.beta * self.context_weights[prev_bmu]
