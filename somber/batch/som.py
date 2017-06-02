@@ -102,14 +102,14 @@ class Som(object):
         else:
             self.influence_size = influence_size
 
-    def train(self,
-              X,
-              num_epochs=10,
-              total_updates=1000,
-              stop_lr_updates=1.0,
-              stop_nb_updates=1.0,
-              batch_size=100,
-              show_progressbar=False):
+    def fit(self,
+            X,
+            num_epochs=10,
+            total_updates=1000,
+            stop_lr_updates=1.0,
+            stop_nb_updates=1.0,
+            batch_size=100,
+            show_progressbar=False):
         """
         Fit the SOM to some data.
 
@@ -283,9 +283,9 @@ class Som(object):
         given the learning rate and map size
         :return: A vector describing activation values for each unit.
         """
-        activation, difference_x = self._get_bmus(x)
+        activation = self._get_bmus(x)
         influence, bmu = self._apply_influences(activation, influences)
-        self.weights += self._calculate_update(difference_x, influence).mean(0)
+        self.weights += self._calculate_update(x, self.weights, influence).mean(0)
 
         return activation
 
@@ -314,7 +314,7 @@ class Som(object):
         activations = []
 
         for x in X:
-            activation, _ = self._get_bmus(x)
+            activation = self._get_bmus(x)
             activations.extend(activation)
 
         return np.array(activations)
@@ -552,11 +552,10 @@ class Som(object):
          reused in the update calculation.
         """
 
-        differences = self._distance_difference(x, self.weights)
         activations = self.distance_function(x, self.weights)
-        return activations, differences
+        return activations
 
-    def _calculate_update(self, difference_vector, influence):
+    def _calculate_update(self, x, weights, influence):
         """
         Multiply the difference vector with the influence vector.
 
@@ -569,9 +568,9 @@ class Som(object):
         In this case (X - w) has been precomputed for speed, in the function
         _get_bmus.
 
-        :param difference_vector: The difference between the input and
-        weights.
+        :param x: The input vector
+        :param weights: The weights
         :param influence: The influence the result has on each unit,
         depending on distance. Already includes the learning rate.
         """
-        return difference_vector * influence
+        return self._distance_difference(x, weights) * influence

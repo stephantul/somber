@@ -189,123 +189,10 @@ class Sequential(Som):
         prev = self._init_prev(X)
 
         for x in X:
-            prev = self._get_bmus(x, prev_activation=prev)[0]
+            prev = self._get_bmus(x, prev_activation=prev)
             distances.extend(prev)
 
         return np.array(distances)
-
-
-class Recurrent(Sequential):
-    """A recurrent SOM."""
-
-    def __init__(self,
-                 map_dim,
-                 data_dim,
-                 learning_rate,
-                 alpha,
-                 sigma=None,
-                 lrfunc=expo,
-                 nbfunc=expo,
-                 min_max=np_min,
-                 distance_function=euclidean,
-                 influence_size=None):
-        """
-        A recurrent SOM.
-
-        The recurrent SOM attempts to model sequences by integrating
-        the current weight vector with the activation in the previous
-        time-step. Weights thus become shared between current and previous
-        activation.
-
-        :param map_dim: A tuple of map dimensions,
-        e.g. (10, 10) instantiates a 10 by 10 map.
-        :param data_dim: The data dimensionality.
-        :param learning_rate: The learning rate, which is decreased
-        according to some function.
-        :param lrfunc: The function to use in decreasing the learning rate.
-        The functions are defined in utils. Default is exponential.
-        :param nbfunc: The function to use in decreasing the neighborhood size.
-        The functions are defined in utils. Default is exponential.
-        :param alpha: a float between 0 and 1, specifying how much weight the
-        previous activation receives in comparison to the current activation.
-        :param sigma: The starting value for the neighborhood size, which is
-        decreased over time. If sigma is None (default), sigma is calculated as
-        ((max(map_dim) / 2) + 0.01), which is generally a good value.
-        """
-        super().__init__(map_dim,
-                         data_dim,
-                         learning_rate,
-                         lrfunc, nbfunc,
-                         sigma, min_max,
-                         distance_function)
-        self.alpha = alpha
-
-    def _init_prev(self, X):
-        """
-        Initialize the context vector.
-
-        Initializes the context to a safe value at the beginning
-        of training. In this case, this is a (batch * weight_dim * data_dim)
-        matrix.
-
-        :param X: The input data.
-        :return: A (batch * weight_dim * data_dim) matrix.
-        """
-        return np.zeros((X.shape[1], self.weight_dim, X.shape[2]))
-
-    def _example(self, x, influences, **kwargs):
-        """
-        A single example.
-
-        :param X: a numpy array of data, representing a single batch
-        :param influences: The influence at the current epoch,
-        given the learning rate and map size
-        :return: An array representing the difference between
-        weight vectors and the input.
-        """
-        prev = kwargs['prev_activation']
-
-        # Get the indices of the Best Matching Units, given the data.
-        activation, difference = self._get_bmus(x, prev_activation=prev)
-        influence, bmu = self._apply_influences(activation, influences)
-        self.weights += self._calculate_update(difference, influence).mean(0)
-
-        return difference
-
-    def _get_bmus(self, x, **kwargs):
-        """
-        Get the best matching units, based on euclidean distance.
-
-        :param x: A batch of data.
-        :return: The activation, and difference between the input and weights.
-        """
-        # Differences is the components of the weights subtracted from the weight vector.
-        difference_x = self._distance_difference(x, self.weights)
-        distances = (1 - self.alpha) * kwargs['prev_activation'] + (self.alpha * difference_x)
-
-        # Compute the actual activation through euclidean.
-        activation = np.array([np.sum(np.square(d), 1) for d in distances])
-        return activation, difference_x
-
-    def _predict_base(self, X):
-        """
-        Predict distances to some input data.
-
-        :param X: The input data.
-        :return: An array of arrays, representing the activation
-        each node has to each input.
-        """
-        X = self._create_batches(X, 1)
-        X = np.asarray(X, dtype=np.float32)
-
-        activations = []
-        prev = self._init_prev(X)
-
-        for x in X:
-            activation, prev_d = self._get_bmus(x, prev_activation=prev)
-            activations.extend(activation)
-
-        return np.array(activations)
 
 
 class Recursive(Sequential):
@@ -374,12 +261,12 @@ class Recursive(Sequential):
 
         prev = kwargs['prev_activation']
 
-        activation, diff_x, diff_context = self._get_bmus(x, prev_activation=prev)
+        activation = self._get_bmus(x, prev_activation=prev)
 
         influence, bmu = self._apply_influences(activation, influences)
         # Update
-        self.weights += np.mean(self._calculate_update(diff_x, influence[:, :, :self.data_dim]), 0)
-        res = np.squeeze(np.mean(self._calculate_update(diff_context, influence), 0))
+        self.weights += np.mean(self._calculate_update(x, self.weights, influence[:, :, :self.data_dim]), 0)
+        res = np.squeeze(np.mean(self._calculate_update(prev, self.context_weights, influence), 0))
         self.context_weights += res
 
         return activation
@@ -403,14 +290,12 @@ class Recursive(Sequential):
         prev = kwargs['prev_activation']
         # Differences is the components of the weights subtracted from
         # the weight vector.
-        difference_x = self._distance_difference(x, self.weights)
-        difference_y = self._distance_difference(prev, self.context_weights)
         distance_x = self.distance_function(x, self.weights)
         distance_y = self.distance_function(prev, self.context_weights)
 
         activation = np.exp(-(np.multiply(distance_x, self.alpha) + np.multiply(distance_y, self.beta)))
 
-        return activation, difference_x, difference_y
+        return activation
 
     @classmethod
     def load(cls, path):
@@ -623,11 +508,11 @@ class Merging(Sequential):
         context = (1 - self.beta) * self.weights[prev_bmu] + self.beta * self.context_weights[prev_bmu]
 
         # Get the indices of the Best Matching Units, given the data.
-        activation, diff_x, diff_context = self._get_bmus(x, prev_activation=context)
+        activation = self._get_bmus(x, prev_activation=context)
         influence, bmu = self._apply_influences(activation, influences)
 
-        self.weights += np.mean(self._calculate_update(diff_x, influence), 0)
-        self.context_weights += np.mean(self._calculate_update(diff_context, influence), 0)
+        self.weights += np.mean(self._calculate_update(x, self.weights, influence), 0)
+        self.context_weights += np.mean(self._calculate_update(prev_bmu, self.context_weights, influence), 0)
 
         return activation
 
@@ -671,11 +556,6 @@ class Merging(Sequential):
         """
         # Differences is the components of the weights
         # subtracted from the weight vector.
-        differences_x = self._distance_difference(x, self.weights)
-        # Idem for context.
-        differences_y = self._distance_difference(kwargs['prev_activation'],
-                                                  self.context_weights)
-
         distances_x = self.distance_function(x, self.weights)
         distances_y = self.distance_function(kwargs['prev_activation'],
                                              self.context_weights)
@@ -684,7 +564,7 @@ class Merging(Sequential):
         # previous activation.
         activations = np.multiply(distances_x, 1 - self.alpha) + np.multiply(distances_y, self.alpha)
 
-        return activations, differences_x, differences_y
+        return activations
 
     def _predict_base(self, X):
         """
@@ -704,7 +584,7 @@ class Merging(Sequential):
 
         for x in X:
             prev_activation = self.weights[self.min_max(prev_activation, 1)[1]]
-            prev_activation = self._get_bmus(x, prev_activation=prev_activation)[0]
+            prev_activation = self._get_bmus(x, prev_activation=prev_activation)
             distances.extend(prev_activation)
 
         return np.array(distances)
