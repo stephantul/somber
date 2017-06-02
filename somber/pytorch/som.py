@@ -2,8 +2,6 @@ import logging
 import time
 import numpy as np
 import torch as t
-import torch.nn as nn
-# import torch.cuda as t
 import json
 
 from ..utils import expo, linear, progressbar
@@ -157,11 +155,14 @@ class Som(object):
         # Precalculate the number of updates.
         lr_update_counter = np.arange(step_size_lr,
                                       (train_length * stop_lr_updates) + step_size_lr,
-                                      step_size_lr)
+                                      step_size_lr, dtype=np.int)
 
         nb_update_counter = np.arange(step_size_nb,
                                       (train_length * stop_nb_updates) + step_size_nb,
-                                      step_size_nb)
+                                      step_size_nb, dtype=np.int)
+
+        print(lr_update_counter)
+        print(nb_update_counter)
 
         start = time.time()
 
@@ -172,8 +173,7 @@ class Som(object):
 
         for epoch in range(num_epochs):
 
-            if show_progressbar:
-                logger.info("Epoch {0} of {1}".format(epoch, num_epochs))
+            logger.info("Epoch {0} of {1}".format(epoch, num_epochs))
 
             idx, nb_step, lr_step = self._epoch(X,
                                                 nb_update_counter,
@@ -230,7 +230,10 @@ class Som(object):
         influences = self._calculate_influence(map_radius) * learning_rate
 
         # Iterate over the training data
-        for x in progressbar(X, use=show_progressbar, logger=logger):
+        for x in progressbar(X,
+                             use=show_progressbar,
+                             mult=self.progressbar_mult,
+                             idx_interval=self.progressbar_interval):
 
             self._example(x, influences)
 
@@ -258,6 +261,8 @@ class Som(object):
                 logger.info("Updated learning rate: {0}".format(learning_rate))
                 # Recalculate the influences
                 influences *= learning_rate
+
+            idx += 1
 
         return idx, nb_step, lr_step
 
@@ -538,7 +543,8 @@ class Som(object):
         input datum, must be same length as X
         :return: A numpy array with identities, the shape of the map.
         """
-        assert len(X) == len(identities)
+        if len(X) != len(identities):
+            raise ValueError("X and identities are not the same length: {0} and {1}".format(len(X), len(identities)))
 
         # Remove all duplicates from X
         X_unique, names = zip(*set([tuple((tuple(s), n)) for s, n in zip(X, identities)]))

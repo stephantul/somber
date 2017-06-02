@@ -1,42 +1,55 @@
 import numpy as np
+import logging
 
-from somber.pytorch.sequential import Recursive
+from somber.pytorch.sequential import Recursive, Recurrent, Merging
+from somber.pytorch.som import Som
 
-X = np.array(
-     [[0., 0., 0.],
-      [0., 0., 1.],
-      [0., 0., 0.5],
-      [0.125, 0.529, 1.0],
-      [0.33, 0.4, 0.67],
-      [0.6, 0.5, 1.0],
-      [0., 1., 0.],
-      [1., 0., 0.],
-      [0., 1., 1.],
-      [1., 0., 1.],
-      [1., 1., 0.],
-      [1., 1., 1.],
-      [.33, .33, .33],
-      [.5, .5, .5],
-      [.66, .66, .66]])
+def test():
 
-X = np.asarray([X] * 100).reshape(X.shape[0] * 100, 3)
-print(X.shape)
+    X = np.random.binomial(1, 0.5, 10000)[:, np.newaxis]
+    # initialize
+    s = Som((10, 10), data_dim=1, learning_rate=0.3)
+    s.train(X, num_epochs=10, total_updates=1000, show_progressbar=True, batch_size=100)
+    s.predict(X)
+    s.quant_error(X)
+    s.map_weights()
+    print("Passed SOM")
+    # s.invert_projection(X, list(X))
 
-color_names = \
-    ['black', 'blue', 'darkblue', 'skyblue',
-     'greyblue', 'lilac', 'green', 'red',
-     'cyan', 'violet', 'yellow', 'white',
-     'darkgrey', 'mediumgrey', 'lightgrey']
+    s = Recursive((10, 10), data_dim=1, learning_rate=0.3, beta=1.0, alpha=3.0)
+    s.train(X, num_epochs=10, total_updates=1000, show_progressbar=True, batch_size=100)
+    s.predict(X)
+    s.quant_error(X)
+    s.map_weights()
+    print("Passed recursive")
+    # s.invert_projection(X, list(X))
 
-# initialize
-s = Recursive((10, 10), data_dim=1, alpha=3.0, beta=1.0, learning_rate=0.3)
+    s = Merging((10, 10), data_dim=1, learning_rate=0.3, alpha=0.02, beta=0.5)
+    s.train(X, num_epochs=10, total_updates=1000, show_progressbar=True, batch_size=100)
+    s.predict(X)
+    s.quant_error(X)
+    s.map_weights()
+    print("Passed merging")
+    # s.invert_projection(X, list(X))
 
-# train
-X = np.random.binomial(1, 0.5, 300000)[:, np.newaxis]
-s.train(X, num_epochs=100, total_updates=1000, show_progressbar=True, batch_size=1)
+    s = Recurrent((10, 10), data_dim=1, learning_rate=0.3, alpha=0.5)
+    s.train(X, num_epochs=10, total_updates=1000, show_progressbar=True, batch_size=100)
+    s.predict(X)
+    s.quant_error(X)
+    s.map_weights()
+    print("Passed recurrent")
+    # s.invert_projection(X, list(X))
 
-s_2 = Recursive((10, 10), data_dim=1, alpha=3.0, beta=1.0, learning_rate=0.3)
-s_2.train(X, num_epochs=100, total_updates=1000, show_progressbar=True, batch_size=10)
+logging.basicConfig(level=logging.INFO)
+
+test()
+
+from somber.batch.sequential import Recursive, Recurrent, Merging
+from somber.batch.som import Som
+
+test()
+
+
 
 # predict: get the index of each best matching unit.
 # predictions = s.predict(X)

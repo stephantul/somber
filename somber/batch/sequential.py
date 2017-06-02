@@ -108,7 +108,10 @@ class Sequential(Som):
         influences = self._calculate_influence(map_radius) * learning_rate
 
         # Iterate over the training data
-        for x in progressbar(X, use=show_progressbar, logger=logger):
+        for x in progressbar(X,
+                             use=show_progressbar,
+                             mult=self.progressbar_mult,
+                             idx_interval=self.progressbar_interval):
 
             prev_activation = self._example(x,
                                             influences,
@@ -248,7 +251,7 @@ class Recurrent(Sequential):
         :param X: The input data.
         :return: A (batch * weight_dim * data_dim) matrix.
         """
-        return np.zeros(X.size()[1], self.weight_dim, X.size()[2])
+        return np.zeros((X.shape[1], self.weight_dim, X.shape[2]))
 
     def _example(self, x, influences, **kwargs):
         """
@@ -281,7 +284,7 @@ class Recurrent(Sequential):
         distances = (1 - self.alpha) * kwargs['prev_activation'] + (self.alpha * difference_x)
 
         # Compute the actual activation through euclidean.
-        activation = np.squeeze(np.array([np.sum(np.square(d), 1) for d in distances]), 2)
+        activation = np.array([np.sum(np.square(d), 1) for d in distances])
         return activation, difference_x
 
     def _predict_base(self, X):
@@ -569,7 +572,10 @@ class Merging(Sequential):
         prev = self._init_prev(X)
 
         # Iterate over the training data
-        for x in progressbar(X, use=show_progressbar, logger=logger):
+        for x in progressbar(X,
+                             use=show_progressbar,
+                             mult=self.progressbar_mult,
+                             idx_interval=self.progressbar_interval):
 
             prev = self._example(x,
                                  influences,

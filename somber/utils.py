@@ -18,14 +18,15 @@ np_max = partial(np_minmax, np.max, np.argmax)
 
 def expo(value, current_step, total_steps):
     """
-    Decreases a value X_0
-    according to an exponential function with lambda equal to (-2.5 * (current_step / total_steps))
+    Decrease a value X_0 according to an exponential function.
+
+    Lambda is equal to (-2.5 * (current_step / total_steps))
 
     :param value: The original value.
-    :param current_step: The current timestep
+    :param current_step: The current timestep.
+    :param total_steps: The maximum number of steps.
     :return:
     """
-
     return value * np.exp(-2.5 * (current_step / total_steps))
 
 
@@ -36,39 +37,46 @@ def static(value, current_step, total_steps):
     :param value: the value
     :return:
     """
-
     return value
 
 
 def linear(value, current_step, total_steps):
     """
-    Decrease a value X_0
-    According to a linear function.
+    Decrease a value X_0 according to a linear function.
 
-    :param value:
-    :param current_step:
-    :param total_steps:
+    :param value: The original value.
+    :param current_step: The current timestep.
+    :param total_steps: The maximum number of steps.
     :return:
     """
-
     return (value * (total_steps - current_step) / total_steps) + 0.01
 
 
-def progressbar(target, width=30, interval=0.2, idx_interval=10, use=True, mult=1):
+def progressbar(target,
+                logger=None,
+                width=30,
+                interval=0.2,
+                idx_interval=10,
+                use=True,
+                mult=1):
     """
-    Progressbar, partially borrowed from Keras:
+    Progressbar, partially borrowed from Keras.
+
     https://github.com/fchollet/keras/blob/088dbe6866fd51f4e0e64866e442968c17abfa10/keras/utils/generic_utils.py
 
     :param target: The target of the progressbar, must be some kind of iterable
     :param width: The width of the progressbar in characters
     :param interval: The time interval with which to update the bar.
-    :param idx_interval: The index interval with which to update the bar. Raise this if the bar is going too fast.
-    :param use: Boolean whetehr to actually use the progressbar (for debugging etc.)
-    :param mult: The multiplier to multiply the progressbar with, useful for accurately displaying batches.
-    e.g. instead of displaying 1/1000 batches of size 100, you can display 100/100000 items.
+    :param idx_interval: The index interval with which to update the bar.
+    Raise this if the bar is going too fast.
+    :param use: Boolean whether to actually use the progressbar
+    (for debugging etc.)
+    :param mult: The multiplier to multiply the progressbar with,
+    useful for accurately displaying batches.
+    e.g. instead of displaying 1/1000 batches of size 100,
+    you can display 100/100000 items.
     :return: None
     """
-
     start = time.time()
     last_update = 0
     interval = interval
@@ -155,27 +163,3 @@ def progressbar(target, width=30, interval=0.2, idx_interval=10, use=True, mult=
             bar += ('.' * (width - prog_width))
             bar += ']'
             sys.stdout.write(bar)
-
-
-def reset_context_symbol(X, symbols):
-    """
-    This function can be used to create a kind of context mask.
-    In all SOM models in this package, all sequences are assumed to be
-    conditionally dependent on all preceding items. This is usually
-    not the case. Therefore, it can be useful to automatically set the
-    context to 0 at certain points.
-
-    Given some input, this function generates a 1 if the symbol is not
-    in symbols, and a 0 if it is.
-
-    :param X: The input sequence
-    :param symbols: A list of symbols which cause the context to be reset to 0
-    :return: A list, the size of X, with 1 in places in which the context should
-    continue, and 0 in places it should be reset.
-    """
-
-    indices = [idx for idx, x in enumerate(X) if x in symbols]
-    mask = np.ones((len(X), 1))
-    mask[indices] = 0
-
-    return mask
