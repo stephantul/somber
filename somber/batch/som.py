@@ -1,16 +1,23 @@
 import logging
 import time
-import numpy as np
+
 import json
 
-from ..utils import expo, linear, progressbar, np_min
-from functools import reduce
+from ..utils import progressbar
+from functools import reduce, partial
 from collections import Counter, defaultdict
 
+from somber import flags
+
+if flags.FLAGS["gpu"] is not None:
+    import cupy as np
+    np.cuda.Device(flags.FLAGS["gpu"]).use()
+else:
+    import numpy as np
 
 logger = logging.getLogger(__name__)
 
-
+@profile
 def euclidean(x, weights):
     """
     batched version of the euclidean distance.
@@ -29,6 +36,55 @@ def euclidean(x, weights):
     res -= dotted
 
     return res
+
+
+def np_minmax(func1, func2, X, axis=None):
+
+    if axis is None:
+        return func1(X)
+    else:
+        return func1(X, axis), func2(X, axis)
+
+np_min = partial(np_minmax, np.min, np.argmin)
+np_max = partial(np_minmax, np.max, np.argmax)
+
+
+def expo(value, current_step, total_steps):
+    """
+    Decrease a value X_0 according to an exponential function.
+
+    Lambda is equal to (-2.5 * (current_step / total_steps))
+
+    :param value: The original value.
+    :param current_step: The current timestep.
+    :param total_steps: The maximum number of steps.
+    :return:
+    """
+    return value * np.exp(-2.5 * (current_step / total_steps))
+
+
+def static(value, current_step, total_steps):
+    """
+    Static function: nothing changes.
+
+    :param value: the value
+    :return:
+    """
+    return value
+
+
+def linear(value, current_step, total_steps):
+    """
+    Decrease a value X_0 according to a linear function.
+
+    :param value: The original value.
+    :param current_step: The current timestep.
+    :param total_steps: The maximum number of steps.
+    :return:
+    """
+    return (value * (total_steps - current_step) / total_steps) + 0.01
+
+
 
 
 class Som(object):
@@ -153,13 +209,13 @@ class Som(object):
 
         # Precalculate the number of updates.
         # Precalculate the number of updates.
-        lr_update_counter = np.arange(step_size_lr,
+        lr_update_counter = set(np.arange(step_size_lr,
                                       (train_length * stop_lr_updates) + step_size_lr,
-                                      step_size_lr)
+                                      step_size_lr).tolist())
 
-        nb_update_counter = np.arange(step_size_nb,
+        nb_update_counter = set(np.arange(step_size_nb,
                                       (train_length * stop_nb_updates) + step_size_nb,
-                                      step_size_nb)
+                                      step_size_nb).tolist())
         start = time.time()
 
         # Train
@@ -217,7 +273,7 @@ class Som(object):
         learning_rate = self.lrfunc(self.learning_rate,
                                     lr_step,
                                     len(lr_update_counter))
-        influences = self._calculate_influence(map_radius) * learning_rate
+        influences = np.multiply(self._calculate_influence(map_radius), learning_rate)
 
         # Iterate over the training data
         for x in progressbar(X,
@@ -237,19 +293,19 @@ class Som(object):
                 # The map radius has been updated, so the influence
                 # needs to be recalculated
                 influences = self._calculate_influence(map_radius)
-                influences *= learning_rate
+                np.multiply(influences, learning_rate)
 
             if idx in lr_update_counter:
                 lr_step += 1
 
                 # Reset the influences back to 1
-                influences /= learning_rate
+                np.divide(influences, learning_rate)
                 learning_rate = self.lrfunc(self.learning_rate,
                                             lr_step,
                                             len(lr_update_counter))
                 logger.info("Updated learning rate: {0}".format(learning_rate))
                 # Recalculate the influences
-                influences *= learning_rate
+                np.multiply(influences, learning_rate)
 
             idx += 1
 
@@ -272,8 +328,12 @@ class Som(object):
         self.progressbar_interval = 1
         self.progressbar_mult = batch_size
 
+        if X.shape[0] % batch_size == 0:
+            return X.reshape((X.shape[0] // batch_size, batch_size, X.shape[1]))
+
         return np.resize(X, (int(np.ceil(X.shape[0] / batch_size)), batch_size, X.shape[1]))
 
+    @profile
     def _example(self, x, influences, **kwargs):
         """
         A single example.
@@ -283,11 +343,15 @@ class Som(object):
         given the learning rate and map size
         :return: A vector describing activation values for each unit.
         """
-        activation = self._get_bmus(x)
-        influence, bmu = self._apply_influences(activation, influences)
-        self.weights += self._calculate_update(x, self.weights, influence).mean(0)
+        activation = self.forward(x)
+        self.backward(x, influences, activation)
 
         return activation
+
+    def backward(self, x, influences, activation, **kwargs):
+
+        influence, bmu = self._apply_influences(activation, influences)
+        np.add(self.weights, self._calculate_update(x, self.weights, influence).mean(0))
 
     def _distance_difference(self, x, weights):
         """
@@ -297,7 +361,13 @@ class Som(object):
         :param weights: An array of weights.
         :return: A vector of differences.
         """
-        return np.array([v - weights for v in x])
+
+        batch, dim = x.shape
+
+        x = x.reshape(batch, 1, dim)
+        weights = np.outer(weights, np.ones(batch)).T.reshape(batch, weights.shape[0], weights.shape[1])
+
+        return np.subtract(x, weights)
 
     def _predict_base(self, X):
         """
@@ -314,10 +384,10 @@ class Som(object):
         activations = []
 
         for x in X:
-            activation = self._get_bmus(x)
+            activation = self.forward(x)
             activations.extend(activation)
 
-        return np.array(activations)
+        return np.array(activations, dtype=np.float32)
 
     def _apply_influences(self, activations, influences):
         """
@@ -348,11 +418,8 @@ class Som(object):
         :return: The neighborhood, reshaped into an array
         """
         neighborhood = np.exp(-self.distance_grid / (2.0 * sigma ** 2))
-        # Reshape neighborhood
-        neighborhood = neighborhood.reshape(self.weight_dim, self.weight_dim)
-        # Repeat neighborhood self.influence_size times
-        neighborhood = np.array([neighborhood] * self.influence_size)
-        return neighborhood.transpose((1, 2, 0))
+        neighborhood = np.outer(neighborhood, np.ones(self.influence_size))
+        return neighborhood.T.reshape(self.weight_dim, self.weight_dim, self.influence_size)
 
     def _initialize_distance_grid(self):
         """
@@ -360,8 +427,8 @@ class Som(object):
 
         :return:
         """
-        p = [self._grid_distance(i).reshape(1, self.weight_dim) for i in range(self.weight_dim)]
-        return np.array(p)
+        p = [self._grid_distance(i) for i in range(self.weight_dim)]
+        return np.array(p, dtype=np.float32)
 
     def _grid_distance(self, index):
         """
@@ -532,17 +599,17 @@ class Som(object):
         X_unique, names = zip(*set([tuple((tuple(s), n)) for s, n in zip(X, identities)]))
         node_match = []
 
-        X_unique = np.array(X_unique)
+        X_unique = np.array(X_unique, dtype=np.float32)
 
-        for node in np.array(self.weights.tolist()):
+        for node in self.weights:
 
             differences = node - X_unique
             distances = np.sum(np.square(differences), 1)
             node_match.append(names[np.argmin(distances)])
 
-        return np.array(node_match)
+        return np.array(node_match, dtype=np.float32)
 
-    def _get_bmus(self, x):
+    def forward(self, x):
         """
         Gets the best matching units, based on euclidean distance.
 
@@ -552,8 +619,7 @@ class Som(object):
          reused in the update calculation.
         """
 
-        activations = self.distance_function(x, self.weights)
-        return activations
+        return self.distance_function(x, self.weights)
 
     def _calculate_update(self, x, weights, influence):
         """

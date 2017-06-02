@@ -1,11 +1,16 @@
-import numpy as np
 import logging
 import json
+from somber import flags
 
 from .som import Som, euclidean
 from ..utils import expo, progressbar, linear, np_min, np_max
 from functools import reduce
 
+if flags.FLAGS["gpu"] is not None:
+    import cupy as np
+    np.cuda.Device(flags.FLAGS["gpu"]).use()
+else:
+    import numpy as np
 
 logger = logging.getLogger(__name__)
 
@@ -169,7 +174,7 @@ class Sequential(Som):
         # Transposes it to (len(X) / batch_size, batch_size, data_dim)
         return X.transpose((1, 0, 2))
 
-    def _get_bmus(self, x, **kwargs):
+    def forward(self, x, **kwargs):
 
         pass
 
@@ -189,10 +194,10 @@ class Sequential(Som):
         prev = self._init_prev(X)
 
         for x in X:
-            prev = self._get_bmus(x, prev_activation=prev)
+            prev = self.forward(x, prev_activation=prev)
             distances.extend(prev)
 
-        return np.array(distances)
+        return np.array(distances, dtype=np.float32)
 
 
 class Recursive(Sequential):
@@ -261,17 +266,22 @@ class Recursive(Sequential):
 
         prev = kwargs['prev_activation']
 
-        activation = self._get_bmus(x, prev_activation=prev)
+        activation = self.forward(x, prev_activation=prev)
 
+        self.backward(x, influences, prev)
+
+        return activation
+
+    def backward(self, x, influences, activation, **kwargs):
+
+        prev = kwargs['previous_activation']
         influence, bmu = self._apply_influences(activation, influences)
         # Update
         self.weights += np.mean(self._calculate_update(x, self.weights, influence[:, :, :self.data_dim]), 0)
         res = np.squeeze(np.mean(self._calculate_update(prev, self.context_weights, influence), 0))
         self.context_weights += res
 
-        return activation
-
-    def _get_bmus(self, x, **kwargs):
+    def forward(self, x, **kwargs):
         """
         Get the best matching units, based on euclidean distance.
 
@@ -504,17 +514,22 @@ class Merging(Sequential):
         given the learning rate and map size
         :return: A vector describing activation values for each unit.
         """
+        prev = kwargs['prev_activation']
+
+        # Get the indices of the Best Matching Units, given the data.
+        activation = self.forward(x, prev_activation=prev)
+        self.backward(x, influences, activation, prev_activation=prev)
+
+        return activation
+
+    def backward(self, x, influences, activation, **kwargs):
+
         prev_bmu = self.min_max(kwargs['prev_activation'], 1)[1]
         context = (1 - self.beta) * self.weights[prev_bmu] + self.beta * self.context_weights[prev_bmu]
 
-        # Get the indices of the Best Matching Units, given the data.
-        activation = self._get_bmus(x, prev_activation=context)
         influence, bmu = self._apply_influences(activation, influences)
-
         self.weights += np.mean(self._calculate_update(x, self.weights, influence), 0)
-        self.context_weights += np.mean(self._calculate_update(prev_bmu, self.context_weights, influence), 0)
-
-        return activation
+        self.context_weights += np.mean(self._calculate_update(context, self.context_weights, influence), 0)
 
     def _entropy(self, prev_bmus, prev_update):
         """
@@ -533,7 +548,7 @@ class Merging(Sequential):
         :param prev_update: The previous update, used as a momentum term.
         :return:
         """
-        prev_bmus = np.array(list(prev_bmus.values()))
+        prev_bmus = np.array(list(prev_bmus.values()), dtype=np.float32)
         prev_bmus = prev_bmus / np.sum(prev_bmus)
 
         new_entropy = -np.sum(prev_bmus * np.nan_to_num(np.log2(prev_bmus)))
@@ -547,7 +562,7 @@ class Merging(Sequential):
 
         return update
 
-    def _get_bmus(self, x, **kwargs):
+    def forward(self, x, **kwargs):
         """
         Get the best matching units, based on euclidean distance.
 
@@ -556,8 +571,12 @@ class Merging(Sequential):
         """
         # Differences is the components of the weights
         # subtracted from the weight vector.
+
+        prev_bmu = self.min_max(kwargs['prev_activation'], 1)[1]
+        context = (1 - self.beta) * self.weights[prev_bmu] + self.beta * self.context_weights[prev_bmu]
+
         distances_x = self.distance_function(x, self.weights)
-        distances_y = self.distance_function(kwargs['prev_activation'],
+        distances_y = self.distance_function(context,
                                              self.context_weights)
 
         # BMU is based on a weighted addition of current and
@@ -584,10 +603,10 @@ class Merging(Sequential):
 
         for x in X:
             prev_activation = self.weights[self.min_max(prev_activation, 1)[1]]
-            prev_activation = self._get_bmus(x, prev_activation=prev_activation)
+            prev_activation = self.forward(x, prev_activation=prev_activation)
             distances.extend(prev_activation)
 
-        return np.array(distances)
+        return np.array(distances, dtype=np.float32)
 
     @classmethod
     def load(cls, path):
