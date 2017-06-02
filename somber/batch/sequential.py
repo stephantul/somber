@@ -2,7 +2,7 @@ import logging
 import json
 from somber import flags
 
-from .som import Som, euclidean
+from .som import Som
 from ..utils import progressbar, expo, linear, np_min, np_max
 from functools import reduce
 
@@ -30,7 +30,6 @@ class Sequential(Som):
                  lrfunc=expo,
                  nbfunc=expo,
                  min_max=np_min,
-                 distance_function=euclidean,
                  influence_size=None):
         """
         A base class for sequential SOMs, removing some code duplication.
@@ -55,7 +54,6 @@ class Sequential(Som):
                          lrfunc,
                          nbfunc,
                          min_max,
-                         distance_function,
                          influence_size=influence_size)
 
     def _init_prev(self, X):
@@ -66,90 +64,6 @@ class Sequential(Som):
         :return: A matrix of the appropriate size for simulating contexts.
         """
         return np.zeros((X.shape[1], self.weight_dim))
-
-    def _epoch(self,
-               X,
-               nb_update_counter,
-               lr_update_counter,
-               idx,
-               nb_step,
-               lr_step,
-               show_progressbar):
-        """
-        A single epoch.
-
-        This function uses an index parameter which is passed around to see to
-        how many training items the SOM has been exposed globally.
-
-        nb and lr_update_counter hold the indices at which the neighborhood
-        size and learning rates need to be updated.
-        These are therefore also passed around. The nb_step and lr_step
-        parameters indicate how many times the neighborhood
-        and learning rate parameters have been updated already.
-
-        :param X: The training data.
-        :param nb_update_counter: The indices at which to
-        update the neighborhood.
-        :param lr_update_counter: The indices at which to
-        update the learning rate.
-        :param idx: The current index.
-        :param nb_step: The current neighborhood step.
-        :param lr_step: The current learning rate step.
-        :param show_progressbar: Whether to show a progress bar or not.
-        :return: The index, neighborhood step and learning rate step
-        """
-        # Initialize the previous activation
-        prev_activation = self._init_prev(X)
-
-        # Calculate the influences for update 0.
-        map_radius = self.nbfunc(self.sigma,
-                                 nb_step,
-                                 len(nb_update_counter))
-
-        learning_rate = self.lrfunc(self.learning_rate,
-                                    lr_step,
-                                    len(lr_update_counter))
-
-        influences = self._calculate_influence(map_radius) * learning_rate
-
-        # Iterate over the training data
-        for x in progressbar(X,
-                             use=show_progressbar,
-                             mult=self.progressbar_mult,
-                             idx_interval=self.progressbar_interval):
-
-            prev_activation = self._example(x,
-                                            influences,
-                                            prev_activation=prev_activation)
-
-            if idx in nb_update_counter:
-                nb_step += 1
-
-                map_radius = self.nbfunc(self.sigma,
-                                         nb_step,
-                                         len(nb_update_counter))
-                logger.info("Updated map radius: {0}".format(map_radius))
-
-                # The map radius has been updated, so the influence
-                # needs to be recalculated
-                influences = self._calculate_influence(map_radius)
-                influences *= learning_rate
-
-            if idx in lr_update_counter:
-                lr_step += 1
-
-                # Reset the influences back to 1
-                influences /= learning_rate
-                learning_rate = self.lrfunc(self.learning_rate,
-                                            lr_step,
-                                            len(lr_update_counter))
-                logger.info("Updated learning rate: {0}".format(learning_rate))
-                # Recalculate the influences
-                influences *= learning_rate
-
-            idx += 1
-
-        return idx, nb_step, lr_step
 
     def _create_batches(self, X, batch_size):
         """
@@ -162,19 +76,29 @@ class Sequential(Som):
 
         :param X: A numpy array, representing your input data.
         Must have 2 dimensions.
-        :param batch_size: The desired pytorch size.
-        :return: A batched version of your data.
+        :param batch_size: The desired batch size.
+        :return: A batched version of your data and a normed version of these batches.
         """
+
         self.progressbar_interval = 1
         self.progressbar_mult = batch_size
+
+        self.w_norm = np.ones((1, self.weights.shape[0]))
+        self.m_norm = np.ones((batch_size, 1))
+
+        print(self.w_norm.shape, self.m_norm.shape)
+
         max_x = int(np.ceil(X.shape[0] / batch_size))
         # This line first resizes the data to
         # (batch_size, len(X) / batch_size, data_dim)
-        X = np.resize(X, (batch_size, max_x, X.shape[1]))
+        if X.shape[0] % batch_size == 0:
+            X = np.reshape(X, (batch_size, X.shape[0] // batch_size, X.shape[1]))
+        else:
+            X = np.resize(X, (batch_size, max_x, X.shape[1]))
         # Transposes it to (len(X) / batch_size, batch_size, data_dim)
-        return X.transpose((1, 0, 2))
+        return X.transpose((1, 0, 2)), np.sum(np.square(X), axis=2).transpose()
 
-    def forward(self, x, **kwargs):
+    def forward(self, x, x_n, **kwargs):
 
         pass
 
@@ -237,6 +161,8 @@ class Recursive(Sequential):
         decreased over time. If sigma is None (default), sigma is calculated as
         ((max(map_dim) / 2) + 0.01), which is generally a good value.
         """
+        influence_size = reduce(np.multiply, map_dim)
+
         super().__init__(map_dim,
                          data_dim,
                          learning_rate,
@@ -244,17 +170,13 @@ class Recursive(Sequential):
                          nbfunc,
                          sigma,
                          min_max=np_max,
-                         influence_size=reduce(np.multiply, map_dim))
+                         influence_size=influence_size)
 
-        self.context_weights = np.zeros((self.weight_dim, self.weight_dim))
+        self.context_weights = np.zeros((self.weight_dim, self.weight_dim), dtype=np.float32)
         self.alpha = alpha
         self.beta = beta
 
-        self.context_weights = self.context_weights
-        self.alpha = self.alpha
-        self.beta = self.beta
-
-    def _example(self, x, influences, **kwargs):
+    def _example(self, x, x_n, influences, **kwargs):
         """
         A single example.
 
@@ -266,7 +188,7 @@ class Recursive(Sequential):
 
         prev = kwargs['prev_activation']
 
-        activation = self.forward(x, prev_activation=prev)
+        activation = self.forward(x, x_n, prev_activation=prev)
         self.backward(x, influences, activation, previous_activation=prev)
 
         return activation
@@ -283,13 +205,13 @@ class Recursive(Sequential):
         """
 
         prev = kwargs['previous_activation']
-        influence, bmu = self._apply_influences(activation, influences)
+        influence = self._apply_influences(activation, influences)
         # Update
         self.weights += np.mean(self._calculate_update(x, self.weights, influence[:, :, :self.data_dim]), 0)
         res = np.squeeze(np.mean(self._calculate_update(prev, self.context_weights, influence), 0))
         self.context_weights += res
 
-    def forward(self, x, **kwargs):
+    def forward(self, x, x_n, **kwargs):
         """
         Get the best matching units, based on euclidean distance.
 
@@ -308,8 +230,9 @@ class Recursive(Sequential):
         prev = kwargs['prev_activation']
         # Differences is the components of the weights subtracted from
         # the weight vector.
-        distance_x = self.distance_function(x, self.weights)
-        distance_y = self.distance_function(prev, self.context_weights)
+        distance_x = self.distance_function(x, x_n, self.weights)
+        prev_n = np.sum(np.square(prev), axis=1)
+        distance_y = self.distance_function(prev, prev_n, self.context_weights)
 
         activation = np.exp(-(np.multiply(distance_x, self.alpha) + np.multiply(distance_y, self.beta)))
 
@@ -398,8 +321,7 @@ class Merging(Sequential):
                  sigma=None,
                  lrfunc=expo,
                  nbfunc=expo,
-                 min_max=np_min,
-                 distance_function=euclidean):
+                 min_max=np_min):
         """
         A merging som.
 
@@ -427,93 +349,14 @@ class Merging(Sequential):
                          lrfunc,
                          nbfunc,
                          sigma,
-                         min_max,
-                         distance_function)
+                         min_max)
 
         self.alpha = alpha
         self.beta = beta
         self.context_weights = np.ones_like(self.weights)
         self.entropy = 0
 
-    def _epoch(self,
-               X,
-               nb_update_counter,
-               lr_update_counter,
-               idx,
-               nb_step,
-               lr_step,
-               show_progressbar):
-        """
-        A single epoch.
-
-        This function uses an index parameter which is passed around to see to
-        how many training items the SOM has been exposed globally.
-
-        nb and lr_update_counter hold the indices at which the neighborhood
-        size and learning rates need to be updated.
-        These are therefore also passed around. The nb_step and lr_step
-        parameters indicate how many times the neighborhood
-        and learning rate parameters have been updated already.
-
-        :param X: The training data.
-        :param nb_update_counter: The indices at which to
-        update the neighborhood.
-        :param lr_update_counter: The indices at which to
-        update the learning rate.
-        :param idx: The current index.
-        :param nb_step: The current neighborhood step.
-        :param lr_step: The current learning rate step.
-        :param show_progressbar: Whether to show a progress bar or not.
-        :return: The index, neighborhood step and learning rate step
-        """
-        map_radius = self.nbfunc(self.sigma, nb_step, len(nb_update_counter))
-        learning_rate = self.lrfunc(self.learning_rate,
-                                    lr_step,
-                                    len(lr_update_counter))
-        influences = self._calculate_influence(map_radius) * learning_rate
-
-        prev = self._init_prev(X)
-
-        # Iterate over the training data
-        for x in progressbar(X,
-                             use=show_progressbar,
-                             mult=self.progressbar_mult,
-                             idx_interval=self.progressbar_interval):
-
-            prev = self._example(x,
-                                 influences,
-                                 prev_activation=prev)
-
-            if idx in nb_update_counter:
-                nb_step += 1
-
-                map_radius = self.nbfunc(self.sigma,
-                                         nb_step,
-                                         len(nb_update_counter))
-                logger.info("Updated map radius: {0}".format(map_radius))
-
-                # The map radius has been updated, so the influence
-                # needs to be recalculated
-                influences = self._calculate_influence(map_radius)
-                influences *= learning_rate
-
-            if idx in lr_update_counter:
-                lr_step += 1
-
-                # Reset the influences back to 1
-                influences /= learning_rate
-                learning_rate = self.lrfunc(self.learning_rate,
-                                            lr_step,
-                                            len(lr_update_counter))
-                logger.info("Updated learning rate: {0}".format(learning_rate))
-                # Recalculate the influences
-                influences *= learning_rate
-
-            idx += 1
-
-        return idx, nb_step, lr_step
-
-    def _example(self, x, influences, **kwargs):
+    def _example(self, x, x_n, influences, **kwargs):
         """
         A single example.
 
@@ -525,7 +368,7 @@ class Merging(Sequential):
         prev = kwargs['prev_activation']
 
         # Get the indices of the Best Matching Units, given the data.
-        activation = self.forward(x, prev_activation=prev)
+        activation = self.forward(x, x_n, prev_activation=prev)
         self.backward(x, influences, activation, prev_activation=prev)
 
         return activation
@@ -544,7 +387,7 @@ class Merging(Sequential):
         prev_bmu = self.min_max(kwargs['prev_activation'], 1)[1]
         context = (1 - self.beta) * self.weights[prev_bmu] + self.beta * self.context_weights[prev_bmu]
 
-        influence, bmu = self._apply_influences(activation, influences)
+        influence = self._apply_influences(activation, influences)
         self.weights += np.mean(self._calculate_update(x, self.weights, influence), 0)
         self.context_weights += np.mean(self._calculate_update(context, self.context_weights, influence), 0)
 
@@ -579,7 +422,7 @@ class Merging(Sequential):
 
         return update
 
-    def forward(self, x, **kwargs):
+    def forward(self, x, x_n, **kwargs):
         """
         Get the best matching units, based on euclidean distance.
 
@@ -592,8 +435,13 @@ class Merging(Sequential):
         prev_bmu = self.min_max(kwargs['prev_activation'], 1)[1]
         context = (1 - self.beta) * self.weights[prev_bmu] + self.beta * self.context_weights[prev_bmu]
 
-        distances_x = self.distance_function(x, self.weights)
+        distances_x = self.distance_function(x,
+                                             x_n,
+                                             self.weights)
+
+        context_n = np.sum(np.square(context), axis=1)
         distances_y = self.distance_function(context,
+                                             context_n,
                                              self.context_weights)
 
         # BMU is based on a weighted addition of current and
@@ -611,16 +459,14 @@ class Merging(Sequential):
         each node has to each input.
         """
 
-        X = self._create_batches(X, len(X))
-        X = np.asarray(X, dtype=np.float32)
-
+        X, X_norm = self._create_batches(X, len(X))
         distances = []
 
         prev_activation = self._init_prev(X)
 
-        for x in X:
+        for x, x_n in zip(X, X_norm):
             prev_activation = self.weights[self.min_max(prev_activation, 1)[1]]
-            prev_activation = self.forward(x, prev_activation=prev_activation)
+            prev_activation = self.forward(x, x_n, prev_activation=prev_activation)
             distances.extend(prev_activation)
 
         return np.array(distances, dtype=np.float32)

@@ -2,40 +2,13 @@ import logging
 import time
 
 import json
+import numpy as np
 
-from ..utils import progressbar, expo, linear, np_min, np_max
+from ..utils import progressbar, linear, expo, np_min
 from functools import reduce
 from collections import Counter, defaultdict
 
-from somber import flags
-
-if flags.FLAGS["gpu"] is not None:
-    import cupy as np
-    np.cuda.Device(flags.FLAGS["gpu"]).use()
-else:
-    import numpy as np
-
 logger = logging.getLogger(__name__)
-
-
-def euclidean(x, weights):
-    """
-    batched version of the euclidean distance.
-
-    :param x: The input
-    :param weights: The weights
-    :return: A matrix containing the distance between each
-    weight and each input.
-    """
-    m_norm = np.sum(np.square(x), axis=1)
-    w_norm = np.sum(np.square(weights), axis=1)
-    dotted = np.dot(np.multiply(x, 2), weights.T)
-
-    res = np.outer(m_norm, np.ones((1, w_norm.shape[0])))
-    res += np.outer(np.ones((m_norm.shape[0], 1)), w_norm.T)
-    res -= dotted
-
-    return res
 
 
 class Som(object):
@@ -51,7 +24,6 @@ class Som(object):
                  nbfunc=expo,
                  sigma=None,
                  min_max=np_min,
-                 distance_function=euclidean,
                  influence_size=None):
         """
         A batched Self-Organizing-Map.
@@ -76,7 +48,6 @@ class Som(object):
             # divide by zero for maps of size 2.
             self.sigma = (max(map_dim) / 2.0) + 0.01
 
-        self.distance_function = distance_function
         self.learning_rate = learning_rate
         # A tuple of dimensions
         # Usually (width, height), but can accomodate one-dimensional maps.
@@ -107,12 +78,15 @@ class Som(object):
         if influence_size is None:
             self.influence_size = self.data_dim
         else:
-            self.influence_size = influence_size
+            self.influence_size = int(influence_size)
+
+        self.w_norm = 0
+        self.m_norm = 0
 
     def fit(self,
             X,
             num_epochs=10,
-            total_updates=1000,
+            total_updates=50,
             stop_lr_updates=1.0,
             stop_nb_updates=1.0,
             batch_size=100,
@@ -150,8 +124,9 @@ class Som(object):
         # The train length
         train_length = (len(X) * num_epochs) // batch_size
 
-        X = self._create_batches(X, batch_size)
-        X = np.asarray(X, dtype=np.float32)
+        X, X_norm = self._create_batches(X, batch_size)
+        print(X.shape, X_norm.shape)
+
 
         # The step size is the number of items between rough epochs.
         # We use len instead of shape because len also works with np.flatiter
@@ -161,12 +136,12 @@ class Som(object):
         # Precalculate the number of updates.
         # Precalculate the number of updates.
         lr_update_counter = set(np.arange(step_size_lr,
-                                      (train_length * stop_lr_updates) + step_size_lr,
-                                      step_size_lr).tolist())
+                                          (train_length * stop_lr_updates) + step_size_lr,
+                                          step_size_lr).tolist())
 
         nb_update_counter = set(np.arange(step_size_nb,
-                                      (train_length * stop_nb_updates) + step_size_nb,
-                                      step_size_nb).tolist())
+                                          (train_length * stop_nb_updates) + step_size_nb,
+                                          step_size_nb).tolist())
         start = time.time()
 
         # Train
@@ -179,6 +154,7 @@ class Som(object):
             logger.info("Epoch {0} of {1}".format(epoch, num_epochs))
 
             idx, nb_step, lr_step = self._epoch(X,
+                                                X_norm,
                                                 nb_update_counter,
                                                 lr_update_counter,
                                                 idx, nb_step,
@@ -189,8 +165,18 @@ class Som(object):
 
         logger.info("Total train time: {0}".format(time.time() - start))
 
+    def _init_prev(self, X):
+        """
+        Placeholder
+
+        :param X:
+        :return:
+        """
+        return None
+
     def _epoch(self,
                X,
+               X_norm,
                nb_update_counter,
                lr_update_counter,
                idx,
@@ -220,18 +206,31 @@ class Som(object):
         :param show_progressbar: Whether to show a progress bar or not.
         :return: The index, neighborhood step and learning rate step
         """
-        map_radius = self.nbfunc(self.sigma, nb_step, len(nb_update_counter))
+        # Initialize the previous activation
+        prev_activation = self._init_prev(X)
+
+        # Calculate the influences for update 0.
+        map_radius = self.nbfunc(self.sigma,
+                                 nb_step,
+                                 len(nb_update_counter))
+
         learning_rate = self.lrfunc(self.learning_rate,
                                     lr_step,
                                     len(lr_update_counter))
-        influences = np.multiply(self._calculate_influence(map_radius), learning_rate)
+
+        influences = self._calculate_influence(map_radius) * learning_rate
 
         # Iterate over the training data
-        for x in progressbar(X,
-                             use=show_progressbar,
-                             mult=self.progressbar_mult,
-                             idx_interval=self.progressbar_interval):
-            self._example(x, influences)
+        for x, x_n in progressbar(zip(X,
+                                  X_norm),
+                                  use=show_progressbar,
+                                  mult=self.progressbar_mult,
+                                  idx_interval=self.progressbar_interval):
+
+            prev_activation = self._example(x,
+                                            x_n,
+                                            influences,
+                                            prev_activation=prev_activation)
 
             if idx in nb_update_counter:
                 nb_step += 1
@@ -244,19 +243,19 @@ class Som(object):
                 # The map radius has been updated, so the influence
                 # needs to be recalculated
                 influences = self._calculate_influence(map_radius)
-                np.multiply(influences, learning_rate)
+                influences *= learning_rate
 
             if idx in lr_update_counter:
                 lr_step += 1
 
                 # Reset the influences back to 1
-                np.divide(influences, learning_rate)
+                influences /= learning_rate
                 learning_rate = self.lrfunc(self.learning_rate,
                                             lr_step,
                                             len(lr_update_counter))
                 logger.info("Updated learning rate: {0}".format(learning_rate))
                 # Recalculate the influences
-                np.multiply(influences, learning_rate)
+                influences *= learning_rate
 
             idx += 1
 
@@ -279,12 +278,15 @@ class Som(object):
         self.progressbar_interval = 1
         self.progressbar_mult = batch_size
 
-        if X.shape[0] % batch_size == 0:
-            return X.reshape((X.shape[0] // batch_size, batch_size, X.shape[1]))
+        self.w_norm = np.ones((1, self.weights.shape[0]))
+        self.m_norm = np.ones((batch_size, 1))
 
-        return np.resize(X, (int(np.ceil(X.shape[0] / batch_size)), batch_size, X.shape[1]))
+        max_x = int(np.ceil(X.shape[0] / batch_size))
+        X = np.resize(X, (max_x, batch_size, X.shape[1]))
 
-    def _example(self, x, influences, **kwargs):
+        return X, np.sum(np.square(X), axis=2)
+
+    def _example(self, x, x_n, influences, **kwargs):
         """
         A single example.
 
@@ -293,7 +295,7 @@ class Som(object):
         given the learning rate and map size
         :return: A vector describing activation values for each unit.
         """
-        activation = self.forward(x)
+        activation = self.forward(x, x_n)
         self.backward(x, influences, activation)
 
         return activation
@@ -309,8 +311,8 @@ class Som(object):
         :return: None
         """
 
-        influence, bmu = self._apply_influences(activation, influences)
-        np.add(self.weights, self._calculate_update(x, self.weights, influence).mean(0))
+        influence = self._apply_influences(activation, influences)
+        self.weights += self._calculate_update(x, self.weights, influence).mean(0)
 
     def _distance_difference(self, x, weights):
         """
@@ -339,11 +341,12 @@ class Som(object):
         each node has to each input.
         """
         X = self._create_batches(X, 1)
+        X_norm = np.sum(np.square(X), axis=2)
 
         activations = []
 
-        for x in X:
-            activation = self.forward(x)
+        for x, x_n in zip(X, X_norm):
+            activation = self.forward(x, x_n)
             activations.extend(activation)
 
         return np.array(activations, dtype=np.float32)
@@ -361,7 +364,7 @@ class Som(object):
         :return: The influence given the bmu, and the index of the bmu itself.
         """
         bmu = self.min_max(activations, 1)[1]
-        return influences[bmu], bmu
+        return influences[bmu]
 
     def _calculate_influence(self, sigma):
         """
@@ -568,7 +571,7 @@ class Som(object):
 
         return np.array(node_match, dtype=np.float32)
 
-    def forward(self, x):
+    def forward(self, x, x_n, **kwargs):
         """
         Gets the best matching units, based on euclidean distance.
 
@@ -578,7 +581,7 @@ class Som(object):
          reused in the update calculation.
         """
 
-        return self.distance_function(x, self.weights)
+        return self.distance_function(x, x_n, self.weights)
 
     def _calculate_update(self, x, weights, influence):
         """
@@ -599,3 +602,22 @@ class Som(object):
         depending on distance. Already includes the learning rate.
         """
         return self._distance_difference(x, weights) * influence
+
+    def distance_function(self, x, x_n, weights):
+        """
+        batched version of the euclidean distance.
+
+        :param x: The input
+        :param weights: The weights
+        :return: A matrix containing the distance between each
+        weight and each input.
+        """
+
+        w_norm = np.sum(np.square(weights), axis=1)
+        dotted = np.dot(np.multiply(x, 2), weights.T)
+
+        res = np.outer(x_n, self.w_norm)
+        res += np.outer(self.m_norm, w_norm.T)
+        res -= dotted
+
+        return res
