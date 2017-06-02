@@ -7,6 +7,7 @@ import numpy as np
 from ..utils import progressbar, linear, expo, np_min
 from functools import reduce
 from collections import Counter, defaultdict
+from line_profiler import *
 
 logger = logging.getLogger(__name__)
 
@@ -115,6 +116,12 @@ class Som(object):
         :param show_progressbar: whether to show the progress bar.
         :return: None
         """
+
+        X = np.asarray(X, dtype=np.float32)
+
+        if X.ndim != 2 or X.shape[1] != self.data_dim:
+            raise ValueError("Your data is not uniformly shaped or has the wrong dimensions.")
+
         if not self.trained:
             min_ = np.min(X, axis=0)
             random = np.random.rand(self.weight_dim).reshape((self.weight_dim, 1))
@@ -284,7 +291,7 @@ class Som(object):
         max_x = int(np.ceil(X.shape[0] / batch_size))
         X = np.resize(X, (max_x, batch_size, X.shape[1]))
 
-        return X, np.sum(np.square(X), axis=2)
+        return X, np.sum(np.square(X), axis=2).astype(np.float32)
 
     def _example(self, x, x_n, influences, **kwargs):
         """
@@ -322,13 +329,7 @@ class Som(object):
         :param weights: An array of weights.
         :return: A vector of differences.
         """
-
-        batch, dim = x.shape
-
-        x = x.reshape(batch, 1, dim)
-        weights = np.outer(weights, np.ones(batch)).T.reshape(batch, weights.shape[0], weights.shape[1])
-
-        return np.subtract(x, weights)
+        return np.asarray([v - weights for v in x])
 
     def _predict_base(self, X):
         """
@@ -340,8 +341,7 @@ class Som(object):
         :return: An array of arrays, representing the activation
         each node has to each input.
         """
-        X = self._create_batches(X, 1)
-        X_norm = np.sum(np.square(X), axis=2)
+        X, X_norm = self._create_batches(X, 1)
 
         activations = []
 
@@ -380,8 +380,7 @@ class Som(object):
         :return: The neighborhood, reshaped into an array
         """
         neighborhood = np.exp(-self.distance_grid / (2.0 * sigma ** 2))
-        neighborhood = np.outer(neighborhood, np.ones(self.influence_size))
-        return neighborhood.T.reshape(self.weight_dim, self.weight_dim, self.influence_size)
+        return neighborhood.reshape(self.weight_dim, self.weight_dim)[:, :, None]
 
     def _initialize_distance_grid(self):
         """
@@ -601,7 +600,8 @@ class Som(object):
         :param influence: The influence the result has on each unit,
         depending on distance. Already includes the learning rate.
         """
-        return self._distance_difference(x, weights) * influence
+        p = self._distance_difference(x, weights)
+        return p * influence
 
     def distance_function(self, x, x_n, weights):
         """
@@ -616,8 +616,7 @@ class Som(object):
         w_norm = np.sum(np.square(weights), axis=1)
         dotted = np.dot(np.multiply(x, 2), weights.T)
 
-        res = np.outer(x_n, self.w_norm)
-        res += np.outer(self.m_norm, w_norm.T)
+        res = np.outer(x_n[:, None], w_norm[None, :])
         res -= dotted
 
         return res

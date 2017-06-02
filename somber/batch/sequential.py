@@ -1,5 +1,6 @@
 import logging
 import json
+import numpy as np
 
 from .som import Som
 from ..utils import expo, linear, np_min, np_max
