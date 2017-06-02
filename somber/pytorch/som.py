@@ -63,6 +63,9 @@ class Som(object):
         Usually reverts to data_dim, but can be
         larger.
         """
+
+        super().__init__()
+
         if sigma is not None:
             self.sigma = sigma
         else:
@@ -83,6 +86,7 @@ class Som(object):
         # Weights are initialized to small random values.
         # Initializing to more appropriate values given the dataset
         # will probably give faster convergence.
+
         self.weights = t.zeros(self.weight_dim, data_dim)
         self.data_dim = data_dim
 
@@ -103,14 +107,14 @@ class Som(object):
         else:
             self.influence_size = influence_size
 
-    def train(self,
-              X,
-              num_epochs=10,
-              total_updates=1000,
-              stop_lr_updates=1.0,
-              stop_nb_updates=1.0,
-              batch_size=100,
-              show_progressbar=False):
+    def fit(self,
+            X,
+            num_epochs=10,
+            total_updates=1000,
+            stop_lr_updates=1.0,
+            stop_nb_updates=1.0,
+            batch_size=100,
+            show_progressbar=False):
         """
         Fit the SOM to some data.
 
@@ -160,9 +164,6 @@ class Som(object):
         nb_update_counter = np.arange(step_size_nb,
                                       (train_length * stop_nb_updates) + step_size_nb,
                                       step_size_nb, dtype=np.int)
-
-        print(lr_update_counter)
-        print(nb_update_counter)
 
         start = time.time()
 
@@ -296,11 +297,14 @@ class Som(object):
         :return: An array representing the difference between
         weight vectors and the input.
         """
-        activation, difference_x = self._get_bmus(x)
-        influence, bmu = self._apply_influences(activation, influences)
-        self.weights += self._calculate_update(difference_x, influence).mean(0)
-
+        activation = self.forward(x)
+        self.backward(x, activation, influences)
         return activation
+
+    def backward(self, x, activation, influences, **kwargs):
+
+        influence, bmu = self._apply_influences(activation, influences)
+        self.weights += self._calculate_update(x, self.weights, influence).mean(0)
 
     def _distance_difference(self, x, weights):
         """
@@ -329,7 +333,7 @@ class Som(object):
         activations = []
 
         for x in X:
-            activation, _ = self._get_bmus(x)
+            activation = self.forward(x)
             activations.extend(activation)
 
         return t.stack(activations)
@@ -560,7 +564,7 @@ class Som(object):
 
         return np.array(node_match)
 
-    def _get_bmus(self, x):
+    def forward(self, x):
         """
         Get the best matching units, based on euclidean distance.
 
@@ -569,11 +573,10 @@ class Som(object):
         the differences between the input and the weights, which can be
         reused in the update calculation.
         """
-        differences = self._distance_difference(x, self.weights)
         activations = self.distance_function(x, self.weights)
-        return activations, differences
+        return activations
 
-    def _calculate_update(self, difference_vector, influence):
+    def _calculate_update(self, x, weights, influence):
         """
         Multiply the difference vector with the influence vector.
 
@@ -586,9 +589,9 @@ class Som(object):
         In this case (X - w) has been precomputed for speed, in the function
         _get_bmus.
 
-        :param difference_vector: The difference between the input and
-        weights.
+        :param x: The input vector
+        :param weights: The weights
         :param influence: The influence the result has on each unit,
         depending on distance. Already includes the learning rate.
         """
-        return difference_vector * influence
+        return self._distance_difference(x, weights) * influence
