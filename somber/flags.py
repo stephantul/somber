@@ -1,2 +1,0 @@
-
-FLAGS = {"gpu": None}
