@@ -1,16 +1,9 @@
 import logging
 import json
-from somber import flags
 
 from .som import Som
-from ..utils import progressbar, expo, linear, np_min, np_max
+from ..utils import expo, linear, np_min, np_max
 from functools import reduce
-
-if flags.FLAGS["gpu"] is not None:
-    import cupy as np
-    np.cuda.Device(flags.FLAGS["gpu"]).use()
-else:
-    import numpy as np
 
 logger = logging.getLogger(__name__)
 
