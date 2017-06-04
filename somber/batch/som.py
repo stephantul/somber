@@ -7,7 +7,6 @@ import numpy as np
 from ..utils import progressbar, linear, expo, np_min
 from functools import reduce
 from collections import Counter, defaultdict
-from line_profiler import *
 
 logger = logging.getLogger(__name__)
 
