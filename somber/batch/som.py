@@ -131,9 +131,7 @@ class Som(object):
         # The train length
         train_length = (len(X) * num_epochs) // batch_size
 
-        X, X_norm = self._create_batches(X, batch_size)
-        print(X.shape, X_norm.shape)
-
+        X = self._create_batches(X, batch_size)
 
         # The step size is the number of items between rough epochs.
         # We use len instead of shape because len also works with np.flatiter
@@ -161,7 +159,6 @@ class Som(object):
             logger.info("Epoch {0} of {1}".format(epoch, num_epochs))
 
             idx, nb_step, lr_step = self._epoch(X,
-                                                X_norm,
                                                 nb_update_counter,
                                                 lr_update_counter,
                                                 idx, nb_step,
@@ -183,7 +180,6 @@ class Som(object):
 
     def _epoch(self,
                X,
-               X_norm,
                nb_update_counter,
                lr_update_counter,
                idx,
@@ -228,14 +224,12 @@ class Som(object):
         influences = self._calculate_influence(map_radius) * learning_rate
 
         # Iterate over the training data
-        for x, x_n in progressbar(zip(X,
-                                  X_norm),
-                                  use=show_progressbar,
-                                  mult=self.progressbar_mult,
-                                  idx_interval=self.progressbar_interval):
+        for x in progressbar(X,
+                             use=show_progressbar,
+                             mult=self.progressbar_mult,
+                             idx_interval=self.progressbar_interval):
 
             prev_activation = self._example(x,
-                                            x_n,
                                             influences,
                                             prev_activation=prev_activation)
 
@@ -285,15 +279,12 @@ class Som(object):
         self.progressbar_interval = 1
         self.progressbar_mult = batch_size
 
-        self.w_norm = np.ones((1, self.weights.shape[0]))
-        self.m_norm = np.ones((batch_size, 1))
-
         max_x = int(np.ceil(X.shape[0] / batch_size))
         X = np.resize(X, (max_x, batch_size, X.shape[1]))
 
-        return X, np.sum(np.square(X), axis=2).astype(np.float32)
+        return X
 
-    def _example(self, x, x_n, influences, **kwargs):
+    def _example(self, x, influences, **kwargs):
         """
         A single example.
 
@@ -302,8 +293,8 @@ class Som(object):
         given the learning rate and map size
         :return: A vector describing activation values for each unit.
         """
-        activation = self.forward(x, x_n)
-        self.backward(x, influences, activation)
+        activation, difference_x = self.forward(x)
+        self.backward(difference_x, influences, activation)
 
         return activation
 
@@ -319,7 +310,7 @@ class Som(object):
         """
 
         influence = self._apply_influences(activation, influences)
-        self.weights += self._calculate_update(x, self.weights, influence).mean(0)
+        self.weights += self._calculate_update(x, influence).mean(0)
 
     def _distance_difference(self, x, weights):
         """
@@ -341,12 +332,12 @@ class Som(object):
         :return: An array of arrays, representing the activation
         each node has to each input.
         """
-        X, X_norm = self._create_batches(X, 1)
+        X = self._create_batches(X, 1)
 
         activations = []
 
-        for x, x_n in zip(X, X_norm):
-            activation = self.forward(x, x_n)
+        for x in zip(X):
+            activation = self.forward(x)[0]
             activations.extend(activation)
 
         return np.array(activations, dtype=np.float32)
@@ -570,7 +561,7 @@ class Som(object):
 
         return np.array(node_match, dtype=np.float32)
 
-    def forward(self, x, x_n, **kwargs):
+    def forward(self, x, **kwargs):
         """
         Gets the best matching units, based on euclidean distance.
 
@@ -580,9 +571,9 @@ class Som(object):
          reused in the update calculation.
         """
 
-        return self.distance_function(x, x_n, self.weights)
+        return self.distance_function(x, self.weights)
 
-    def _calculate_update(self, x, weights, influence):
+    def _calculate_update(self, x, influence):
         """
         Multiply the difference vector with the influence vector.
 
@@ -600,10 +591,10 @@ class Som(object):
         :param influence: The influence the result has on each unit,
         depending on distance. Already includes the learning rate.
         """
-        p = self._distance_difference(x, weights)
-        return p * influence
 
-    def distance_function(self, x, x_n, weights):
+        return np.multiply(x, influence)
+
+    def distance_function(self, x, weights):
         """
         batched version of the euclidean distance.
 
@@ -613,10 +604,7 @@ class Som(object):
         weight and each input.
         """
 
-        w_norm = np.sum(np.square(weights), axis=1)
-        dotted = np.dot(np.multiply(x, 2), weights.T)
+        dist = self._distance_difference(x, weights)
+        res = np.linalg.norm(dist, axis=-1)
 
-        res = np.outer(x_n[:, None], w_norm[None, :])
-        res -= dotted
-
-        return res
+        return res, dist

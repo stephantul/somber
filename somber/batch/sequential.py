@@ -90,9 +90,9 @@ class Sequential(Som):
         else:
             X = np.resize(X, (batch_size, max_x, X.shape[1]))
         # Transposes it to (len(X) / batch_size, batch_size, data_dim)
-        return X.transpose((1, 0, 2)), np.sum(np.square(X), axis=2).transpose()
+        return X.transpose((1, 0, 2))
 
-    def forward(self, x, x_n, **kwargs):
+    def forward(self, x, **kwargs):
 
         pass
 
@@ -112,7 +112,7 @@ class Sequential(Som):
         prev = self._init_prev(X)
 
         for x in X:
-            prev = self.forward(x, prev_activation=prev)
+            prev = self.forward(x, prev_activation=prev)[0]
             distances.extend(prev)
 
         return np.array(distances, dtype=np.float32)
@@ -170,42 +170,44 @@ class Recursive(Sequential):
         self.alpha = alpha
         self.beta = beta
 
-    def _example(self, x, x_n, influences, **kwargs):
+    def _example(self, x, influences, **kwargs):
         """
         A single example.
 
-        :param X: a numpy array of data
+        :param x: a numpy array of data
         :param influences: The influence at the current epoch,
         given the learning rate and map size
+        :param prev_activation: The activation in the previous
+        timestep.
         :return: A vector describing activation values for each unit.
         """
 
         prev = kwargs['prev_activation']
 
-        activation = self.forward(x, x_n, prev_activation=prev)
-        self.backward(x, influences, activation, previous_activation=prev)
+        activation, diff_x, diff_y = self.forward(x, prev_activation=prev)
+        self.backward(diff_x, influences, activation, difference_y=diff_y)
 
         return activation
 
-    def backward(self, x, influences, activation, **kwargs):
+    def backward(self, diff_x, influences, activation, **kwargs):
         """
         Backward pass through the network, including update.
 
-        :param x: The input data
+        :param diff_x: The difference between the input data and the weights
         :param influences: The influences at the current time-step
         :param activation: The activation at the output
         :param kwargs:
         :return: None
         """
 
-        prev = kwargs['previous_activation']
+        diff_y = kwargs['difference_y']
         influence = self._apply_influences(activation, influences)
         # Update
-        self.weights += np.mean(self._calculate_update(x, self.weights, influence[:, :, :self.data_dim]), 0)
-        res = np.squeeze(np.mean(self._calculate_update(prev, self.context_weights, influence), 0))
+        self.weights += np.mean(self._calculate_update(diff_x, influence[:, :, :self.data_dim]), 0)
+        res = np.squeeze(np.mean(self._calculate_update(diff_y, influence), 0))
         self.context_weights += res
 
-    def forward(self, x, x_n, **kwargs):
+    def forward(self, x, **kwargs):
         """
         Get the best matching units, based on euclidean distance.
 
@@ -219,18 +221,18 @@ class Recursive(Sequential):
         the unit matches well and 0 means the unit doesn't match at all.
 
         :param x: A batch of data.
-        :return: The activation, and difference between the input and weights.
+        :return: The activation, the difference between the input and weights.
+        and the difference between the context and weights.
         """
         prev = kwargs['prev_activation']
         # Differences is the components of the weights subtracted from
         # the weight vector.
-        distance_x = self.distance_function(x, x_n, self.weights)
-        prev_n = np.sum(np.square(prev), axis=1)
-        distance_y = self.distance_function(prev, prev_n, self.context_weights)
+        distance_x, diff_x = self.distance_function(x, self.weights)
+        distance_y, diff_y = self.distance_function(prev, self.context_weights)
 
         activation = np.exp(-(np.multiply(distance_x, self.alpha) + np.multiply(distance_y, self.beta)))
 
-        return activation
+        return activation, diff_x, diff_y
 
     @classmethod
     def load(cls, path):
@@ -350,7 +352,7 @@ class Merging(Sequential):
         self.context_weights = np.ones_like(self.weights)
         self.entropy = 0
 
-    def _example(self, x, x_n, influences, **kwargs):
+    def _example(self, x, influences, **kwargs):
         """
         A single example.
 
@@ -362,28 +364,26 @@ class Merging(Sequential):
         prev = kwargs['prev_activation']
 
         # Get the indices of the Best Matching Units, given the data.
-        activation = self.forward(x, x_n, prev_activation=prev)
-        self.backward(x, influences, activation, prev_activation=prev)
+        activation, diff_x, diff_y = self.forward(x, prev_activation=prev)
+        self.backward(diff_x, influences, activation, difference_y=diff_y)
 
         return activation
 
-    def backward(self, x, influences, activation, **kwargs):
+    def backward(self, diff_x, influences, activation, **kwargs):
         """
         Backward pass through the network, including update.
 
-        :param x: The input data
+        :param diff_x: The difference between the input data and the weights
         :param influences: The influences at the current time-step
         :param activation: The activation at the output
         :param kwargs:
         :return: None
         """
 
-        prev_bmu = self.min_max(kwargs['prev_activation'], 1)[1]
-        context = (1 - self.beta) * self.weights[prev_bmu] + self.beta * self.context_weights[prev_bmu]
-
+        diff_y = kwargs['difference_y']
         influence = self._apply_influences(activation, influences)
-        self.weights += np.mean(self._calculate_update(x, self.weights, influence), 0)
-        self.context_weights += np.mean(self._calculate_update(context, self.context_weights, influence), 0)
+        self.weights += np.mean(self._calculate_update(diff_x, influence), 0)
+        self.context_weights += np.mean(self._calculate_update(diff_y, influence), 0)
 
     def _entropy(self, prev_bmus, prev_update):
         """
@@ -416,7 +416,7 @@ class Merging(Sequential):
 
         return update
 
-    def forward(self, x, x_n, **kwargs):
+    def forward(self, x, **kwargs):
         """
         Get the best matching units, based on euclidean distance.
 
@@ -429,20 +429,17 @@ class Merging(Sequential):
         prev_bmu = self.min_max(kwargs['prev_activation'], 1)[1]
         context = (1 - self.beta) * self.weights[prev_bmu] + self.beta * self.context_weights[prev_bmu]
 
-        distances_x = self.distance_function(x,
-                                             x_n,
+        distances_x, diff_x = self.distance_function(x,
                                              self.weights)
 
-        context_n = np.sum(np.square(context), axis=1)
-        distances_y = self.distance_function(context,
-                                             context_n,
+        distances_y, diff_y = self.distance_function(context,
                                              self.context_weights)
 
         # BMU is based on a weighted addition of current and
         # previous activation.
         activations = np.multiply(distances_x, 1 - self.alpha) + np.multiply(distances_y, self.alpha)
 
-        return activations
+        return activations, diff_x, diff_y
 
     def _predict_base(self, X):
         """
@@ -453,14 +450,14 @@ class Merging(Sequential):
         each node has to each input.
         """
 
-        X, X_norm = self._create_batches(X, len(X))
+        X = self._create_batches(X, len(X))
         distances = []
 
         prev_activation = self._init_prev(X)
 
-        for x, x_n in zip(X, X_norm):
+        for x in X:
             prev_activation = self.weights[self.min_max(prev_activation, 1)[1]]
-            prev_activation = self.forward(x, x_n, prev_activation=prev_activation)
+            prev_activation = self.forward(x, prev_activation=prev_activation)[0]
             distances.extend(prev_activation)
 
         return np.array(distances, dtype=np.float32)
