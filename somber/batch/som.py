@@ -319,7 +319,7 @@ class Som(object):
         :param weights: An array of weights.
         :return: A vector of differences.
         """
-        return np.asarray([v - weights for v in x])
+        return x[:, None, :] - weights[None, :, :]
 
     def _predict_base(self, X):
         """
