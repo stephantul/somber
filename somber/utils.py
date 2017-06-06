@@ -16,6 +16,27 @@ np_min = partial(np_minmax, np.min, np.argmin)
 np_max = partial(np_minmax, np.max, np.argmax)
 
 
+def resize(X, new_shape):
+    """
+    Dummy resize function because cupy currently does
+    not support direct resizing of arrays.
+
+    :param X: The input data
+    :param new_shape: The desired shape of the array.
+    Must have the same dimensions as X.
+    :return: A resized array.
+    """
+
+    # Difference between actual and desired size
+    length_diff = (new_shape[0] * new_shape[1]) - len(X)
+
+    # Pad input data with zeros
+    z = np.concatenate([X, np.zeros((length_diff, X.shape[1]))])
+
+    # Reshape
+    return z.reshape(new_shape)
+
+
 def expo(value, current_step, total_steps):
     """
     Decrease a value X_0 according to an exponential function.
