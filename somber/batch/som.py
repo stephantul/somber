@@ -4,7 +4,7 @@ import time
 import json
 import numpy as np
 
-from ..utils import progressbar, linear, expo, np_min
+from ..utils import progressbar, linear, expo, np_min, resize
 from functools import reduce
 from collections import Counter, defaultdict
 
@@ -23,8 +23,7 @@ class Som(object):
                  lrfunc=expo,
                  nbfunc=expo,
                  sigma=None,
-                 min_max=np_min,
-                 influence_size=None):
+                 min_max=np_min):
         """
         A batched Self-Organizing-Map.
 
@@ -35,8 +34,6 @@ class Som(object):
         :param lrfunc: The function used to decrease the learning rate.
         :param nbfunc: The function used to decrease the neighborhood
         :param min_max: The function used to determine the winner.
-        :param distance_function: The function used to do distance calculation.
-        Euclidean by default.
         :param influence_size: The size of the influence matrix.
         Usually reverts to data_dim, but can be
         larger.
@@ -75,22 +72,17 @@ class Som(object):
 
         self.progressbar_interval = 10
         self.progressbar_mult = 1
-        if influence_size is None:
-            self.influence_size = self.data_dim
-        else:
-            self.influence_size = int(influence_size)
-
-        self.w_norm = 0
-        self.m_norm = 0
 
     def fit(self,
             X,
             num_epochs=10,
+            init_pca=True,
             total_updates=50,
             stop_lr_updates=1.0,
             stop_nb_updates=1.0,
             batch_size=100,
-            show_progressbar=False):
+            show_progressbar=False,
+            seed=44):
         """
         Fit the SOM to some data.
 
@@ -113,15 +105,21 @@ class Som(object):
         the training data the neighborhood should decrease.
         :param batch_size: the batch size
         :param show_progressbar: whether to show the progress bar.
+        :param seed: The random seed
         :return: None
         """
 
         X = np.asarray(X, dtype=np.float32)
 
-        if X.ndim != 2 or X.shape[1] != self.data_dim:
-            raise ValueError("Your data is not uniformly shaped or has the wrong dimensions.")
+        if X.ndim != 2:
+            raise ValueError("Your data is not a 2D matrix. Actual size: {0}".format(X.shape))
 
-        if not self.trained:
+        if X.shape[1] != self.data_dim:
+            raise ValueError("Your data size != weight dim: {0}, expected {1}".format(X.shape[1], self.data_dim))
+
+        np.random.seed(seed)
+
+        if init_pca:
             min_ = np.min(X, axis=0)
             random = np.random.rand(self.weight_dim).reshape((self.weight_dim, 1))
             temp = np.outer(random, np.abs(np.max(X, axis=0) - min_))
@@ -228,9 +226,9 @@ class Som(object):
                              mult=self.progressbar_mult,
                              idx_interval=self.progressbar_interval):
 
-            prev_activation = self._example(x,
-                                            influences,
-                                            prev_activation=prev_activation)
+            prev_activation = self._propagate(x,
+                                              influences,
+                                              prev_activation=prev_activation)
 
             if idx in nb_update_counter:
                 nb_step += 1
@@ -279,13 +277,14 @@ class Som(object):
         self.progressbar_mult = batch_size
 
         max_x = int(np.ceil(X.shape[0] / batch_size))
-        X = np.resize(X, (max_x, batch_size, X.shape[1]))
+        X = resize(X, (max_x, batch_size, self.data_dim))
 
         return X
 
-    def _example(self, x, influences, **kwargs):
+    def _propagate(self, x, influences, **kwargs):
         """
-        A single example.
+        Propagate a single example through the network, and update the
+        weights based on the response and map parameters.
 
         :param X: a numpy array of data
         :param influences: The influence at the current epoch,
@@ -296,6 +295,38 @@ class Som(object):
         self.backward(difference_x, influences, activation)
 
         return activation
+
+    def forward(self, x, **kwargs):
+        """
+        Gets the best matching units, based on euclidean distance.
+
+        :param x: The input vector
+        :return: The activations, and
+         the differences between the input and the weights, which can be
+         reused in the update calculation.
+        """
+
+        return self.distance_function(x, self.weights)
+
+    def _calculate_update(self, x, influence):
+        """
+        Multiply the difference vector with the influence vector.
+
+        The influence vector is chosen based on the BMU, so that the update
+        done to the every weight node is proportional to its distance from the
+        BMU.
+
+        Implicitly uses Oja's Rule: delta_W = alpha * (X - w)
+
+        In this case (X - w) has been precomputed for speed, in the function
+        _get_bmus.
+
+        :param x: The input vector
+        :param influence: The influence the result has on each unit,
+        depending on distance. Already includes the learning rate.
+        """
+
+        return np.multiply(x, influence)
 
     def backward(self, x, influences, activation, **kwargs):
         """
@@ -311,6 +342,21 @@ class Som(object):
         influence = self._apply_influences(activation, influences)
         self.weights += self._calculate_update(x, influence).mean(0)
 
+    def distance_function(self, x, weights):
+        """
+        batched version of the euclidean distance.
+
+        :param x: The input
+        :param weights: The weights
+        :return: A matrix containing the distance between each
+        weight and each input.
+        """
+
+        dist = self._distance_difference(x, weights)
+        res = np.linalg.norm(dist, axis=-1)
+
+        return res, dist
+
     def _distance_difference(self, x, weights):
         """
         Calculate the difference between an input and all the weights.
@@ -320,27 +366,6 @@ class Som(object):
         :return: A vector of differences.
         """
         return x[:, None, :] - weights[None, :, :]
-
-    def _predict_base(self, X, batch_size=100):
-        """
-        Predict distances to some input data.
-
-        This function should not be directly used.
-
-        :param X: The input data.
-        :return: An array of arrays, representing the activation
-        each node has to each input.
-        """
-        batched = self._create_batches(X, batch_size)
-
-        activations = []
-
-        for x in batched:
-            activation = self.forward(x)[0]
-            activations.extend(activation)
-
-        activations = np.asarray(activations, dtype=np.float32)
-        return activations.reshape(X.shape[0], self.weight_dim)
 
     def _apply_influences(self, activations, influences):
         """
@@ -406,61 +431,37 @@ class Som(object):
 
         return distance.ravel()
 
-    def map_weights(self):
+    def _predict_base(self, X, batch_size=100):
         """
-        Retrieve the grid as a list of lists of weights.
+        Predict distances to some input data.
 
-        :return: A three-dimensional Numpy array of values.
+        This function should not be directly used.
+
+        :param X: The input data.
+        :return: An array of arrays, representing the activation
+        each node has to each input.
         """
-        width, height = self.map_dimensions
-        # Reshape to appropriate dimensions
-        view = self.weights.reshape((width, height, self.data_dim))
-        return view.T
+        batched = self._create_batches(X, batch_size)
 
-    @classmethod
-    def load(cls, path):
+        activations = []
+
+        for x in batched:
+            activation = self.forward(x)[0]
+            activations.extend(activation)
+
+        activations = np.asarray(activations, dtype=np.float32)
+        return activations.reshape(X.shape[0], self.weight_dim)
+
+    def predict(self, X, batch_size=100):
         """
-        Loads a SOM from a JSON file.
+        Predict the BMU for each input data.
 
-        :param path: The path to the JSON file.
-        :return: A SOM.
+        :param X: Input data.
+        :param batch_size: The batch size to use in prediction.
+        :return: The index of the bmu which best describes the input data.
         """
-
-        data = json.load(open(path))
-
-        weights = data['weights']
-        weights = np.asarray(weights, dtype=np.float32)
-        datadim = weights.shape[1]
-
-        dimensions = data['dimensions']
-        lrfunc = expo if data['lrfunc'] == 'expo' else linear
-        nbfunc = expo if data['nbfunc'] == 'expo' else linear
-        lr = data['lr']
-        sigma = data['sigma']
-
-        s = cls(dimensions, datadim, lr, lrfunc=lrfunc, nbfunc=nbfunc, sigma=sigma)
-        s.weights = weights
-        s.trained = True
-
-        return s
-
-    def save(self, path):
-        """
-        Saves a SOM to a JSON file.
-
-        :param path: The path to the JSON file that will be created
-        :return: None
-        """
-
-        to_save = {}
-        to_save['weights'] = [[float(w) for w in x] for x in self.weights]
-        to_save['dimensions'] = self.map_dimensions
-        to_save['lrfunc'] = 'expo' if self.lrfunc == expo else 'linear'
-        to_save['nbfunc'] = 'expo' if self.nbfunc == expo else 'linear'
-        to_save['lr'] = self.learning_rate
-        to_save['sigma'] = self.sigma
-
-        json.dump(to_save, open(path, 'w'))
+        dist = self._predict_base(X, batch_size)
+        return self.min_max(dist, 1)[1]
 
     def quant_error(self, X):
         """
@@ -476,18 +477,7 @@ class Som(object):
         dist = self._predict_base(X)
         return self.min_max(dist, 1)[0]
 
-    def predict(self, X, batch_size=100):
-        """
-        Predict the BMU for each input data.
-
-        :param X: Input data.
-        :param batch_size: The batch size to use in prediction.
-        :return: The index of the bmu which best describes the input data.
-        """
-        dist = self._predict_base(X, batch_size)
-        return self.min_max(dist, 1)[1]
-
-    def receptive_field(self, X, identities, max_len=10, threshold=0.9, batch_size=100):
+    def receptive_field(self, X, identities, max_len=10, threshold=0.9, batch_size=1):
         """
         Calculate the receptive field of the SOM on some data.
 
@@ -501,6 +491,10 @@ class Som(object):
         :param max_len: The maximum length sequence we expect.
         Increasing the window size leads to accurate results,
         but costs more memory.
+        :param threshold: The threshold at which we consider a receptive field as being valid.
+        If at least this proportion of the sequences of a neuron have the same suffix, that suffix
+        is counted as acquired.
+        :param batch_size: The batch size to use in prediction
         :return: The receptive field of each neuron.
         """
         assert len(X) == len(identities)
@@ -562,50 +556,58 @@ class Som(object):
 
         return np.array(node_match, dtype=np.float32)
 
-    def forward(self, x, **kwargs):
+    def map_weights(self):
         """
-        Gets the best matching units, based on euclidean distance.
+        Retrieve the grid as a list of lists of weights.
 
-        :param x: The input vector
-        :return: The activations, and
-         the differences between the input and the weights, which can be
-         reused in the update calculation.
+        :return: A three-dimensional Numpy array of values.
         """
+        width, height = self.map_dimensions
+        # Reshape to appropriate dimensions
+        view = self.weights.reshape((width, height, self.data_dim))
+        return view.T
 
-        return self.distance_function(x, self.weights)
-
-    def _calculate_update(self, x, influence):
+    @classmethod
+    def load(cls, path):
         """
-        Multiply the difference vector with the influence vector.
+        Loads a SOM from a JSON file.
 
-        The influence vector is chosen based on the BMU, so that the update
-        done to the every weight node is proportional to its distance from the
-        BMU.
-
-        Implicitly uses Oja's Rule: delta_W = alpha * (X - w)
-
-        In this case (X - w) has been precomputed for speed, in the function
-        _get_bmus.
-
-        :param x: The input vector
-        :param weights: The weights
-        :param influence: The influence the result has on each unit,
-        depending on distance. Already includes the learning rate.
+        :param path: The path to the JSON file.
+        :return: A SOM.
         """
 
-        return np.multiply(x, influence)
+        data = json.load(open(path))
 
-    def distance_function(self, x, weights):
+        weights = data['weights']
+        weights = np.asarray(weights, dtype=np.float32)
+        datadim = weights.shape[1]
+
+        dimensions = data['dimensions']
+        lrfunc = expo if data['lrfunc'] == 'expo' else linear
+        nbfunc = expo if data['nbfunc'] == 'expo' else linear
+        lr = data['lr']
+        sigma = data['sigma']
+
+        s = cls(dimensions, datadim, lr, lrfunc=lrfunc, nbfunc=nbfunc, sigma=sigma)
+        s.weights = weights
+        s.trained = True
+
+        return s
+
+    def save(self, path):
         """
-        batched version of the euclidean distance.
+        Saves a SOM to a JSON file.
 
-        :param x: The input
-        :param weights: The weights
-        :return: A matrix containing the distance between each
-        weight and each input.
+        :param path: The path to the JSON file that will be created
+        :return: None
         """
 
-        dist = self._distance_difference(x, weights)
-        res = np.linalg.norm(dist, axis=-1)
+        to_save = {}
+        to_save['weights'] = [[float(w) for w in x] for x in self.weights]
+        to_save['dimensions'] = self.map_dimensions
+        to_save['lrfunc'] = 'expo' if self.lrfunc == expo else 'linear'
+        to_save['nbfunc'] = 'expo' if self.nbfunc == expo else 'linear'
+        to_save['lr'] = self.learning_rate
+        to_save['sigma'] = self.sigma
 
-        return res, dist
+        json.dump(to_save, open(path, 'w'))
