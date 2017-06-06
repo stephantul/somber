@@ -57,7 +57,15 @@ class Sequential(Som):
         :param X: The input data.
         :return: A matrix of the appropriate size for simulating contexts.
         """
-        return np.zeros((X.shape[1], self.weight_dim))
+
+        z_ = X[-2, 1:]
+        z_ = np.vstack([np.zeros((X.shape[2], 1)), z_])
+
+        z = X[-1, 1:]
+        z = np.vstack([np.zeros((X.shape[2], 1)), z])
+        res, _ = self.distance_function(z_, self.weights)
+        p = self.min_max(res, 1)[1]
+        return self.forward(z, prev_activation=np.array(self.context_weights[p]))[0]
 
     def _create_batches(self, X, batch_size):
         """
@@ -96,7 +104,7 @@ class Sequential(Som):
 
         pass
 
-    def _predict_base(self, X):
+    def _predict_base(self, X, batch_size=100):
         """
         Predict distances to some input data.
 
@@ -104,18 +112,18 @@ class Sequential(Som):
         :return: An array of arrays, representing the activation
         each node has to each input.
         """
-        X = self._create_batches(X, len(X))
-        X = np.asarray(X, dtype=np.float32)
+        batched = self._create_batches(X, batch_size)
 
-        distances = []
+        activations = []
 
-        prev = self._init_prev(X)
+        activation = self._init_prev(batched)
 
-        for x in X:
-            prev = self.forward(x, prev_activation=prev)[0]
-            distances.extend(prev)
+        for x in batched:
+            activation = self.forward(x, prev_activation=activation)[0]
+            activations.append(activation)
 
-        return np.array(distances, dtype=np.float32)
+        activations = np.asarray(activations, dtype=np.float32).transpose((1, 0, 2))
+        return activations.reshape(X.shape[0], self.weight_dim)
 
 
 class Recursive(Sequential):
@@ -186,7 +194,6 @@ class Recursive(Sequential):
 
         activation, diff_x, diff_y = self.forward(x, prev_activation=prev)
         self.backward(diff_x, influences, activation, difference_y=diff_y)
-
         return activation
 
     def backward(self, diff_x, influences, activation, **kwargs):
@@ -231,7 +238,6 @@ class Recursive(Sequential):
         distance_y, diff_y = self.distance_function(prev, self.context_weights)
 
         activation = np.exp(-(np.multiply(distance_x, self.alpha) + np.multiply(distance_y, self.beta)))
-
         return activation, diff_x, diff_y
 
     @classmethod
@@ -441,7 +447,7 @@ class Merging(Sequential):
 
         return activations, diff_x, diff_y
 
-    def _predict_base(self, X):
+    def _predict_base(self, X, batch_size=1):
         """
         Predict distances to some input data.
 
@@ -450,7 +456,7 @@ class Merging(Sequential):
         each node has to each input.
         """
 
-        X = self._create_batches(X, len(X))
+        X = self._create_batches(X, batch_size=batch_size)
         distances = []
 
         prev_activation = self._init_prev(X)

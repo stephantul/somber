@@ -321,7 +321,7 @@ class Som(object):
         """
         return x[:, None, :] - weights[None, :, :]
 
-    def _predict_base(self, X):
+    def _predict_base(self, X, batch_size=100):
         """
         Predict distances to some input data.
 
@@ -331,15 +331,16 @@ class Som(object):
         :return: An array of arrays, representing the activation
         each node has to each input.
         """
-        X = self._create_batches(X, 1)
+        batched = self._create_batches(X, batch_size)
 
         activations = []
 
-        for x in zip(X):
+        for x in batched:
             activation = self.forward(x)[0]
             activations.extend(activation)
 
-        return np.array(activations, dtype=np.float32)
+        activations = np.asarray(activations, dtype=np.float32)
+        return activations.reshape(X.shape[0], self.weight_dim)
 
     def _apply_influences(self, activations, influences):
         """
@@ -475,17 +476,18 @@ class Som(object):
         dist = self._predict_base(X)
         return self.min_max(dist, 1)[0]
 
-    def predict(self, X):
+    def predict(self, X, batch_size=100):
         """
         Predict the BMU for each input data.
 
         :param X: Input data.
+        :param batch_size: The batch size to use in prediction.
         :return: The index of the bmu which best describes the input data.
         """
-        dist = self._predict_base(X)
+        dist = self._predict_base(X, batch_size)
         return self.min_max(dist, 1)[1]
 
-    def receptive_field(self, X, identities, max_len=5, threshold=0.9):
+    def receptive_field(self, X, identities, max_len=10, threshold=0.9, batch_size=100):
         """
         Calculate the receptive field of the SOM on some data.
 
@@ -504,9 +506,9 @@ class Som(object):
         assert len(X) == len(identities)
 
         receptive_fields = defaultdict(list)
-        predictions = self.predict(X)
+        predictions = self.predict(X, batch_size)
 
-        for idx, p in enumerate(np.squeeze(predictions).tolist()):
+        for idx, p in enumerate(predictions.tolist()):
             receptive_fields[p].append(identities[idx+1 - max_len:idx+1])
 
         sequence = defaultdict(list)
