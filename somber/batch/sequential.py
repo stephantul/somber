@@ -12,7 +12,7 @@ class Sequential(Som):
     """
     A base class for sequential SOMs, removing some code duplication.
 
-    Not usable as a stand-alone class
+    Not usable stand-alone.
     """
 
     def __init__(self,
@@ -435,10 +435,9 @@ class Merging(Sequential):
         Predict distances to some input data.
 
         :param X: The input data.
-        :return: An 2 dimensional array, representing the activation
+        :return: A matrix, representing the activation
         each node has to each input.
         """
-
         X = self._create_batches(X, batch_size=batch_size)
         distances = []
 

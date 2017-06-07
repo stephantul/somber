@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 
 class Som(object):
     """
-    This is the batched version of the basic SOM class.
+    This is the batched version of the basic SOM.
     """
 
     def __init__(self,
@@ -34,9 +34,6 @@ class Som(object):
         :param lrfunc: The function used to decrease the learning rate.
         :param nbfunc: The function used to decrease the neighborhood
         :param min_max: The function used to determine the winner.
-        :param influence_size: The size of the influence matrix.
-        Usually reverts to data_dim, but can be
-        larger.
         """
         if sigma is not None:
             self.sigma = sigma
@@ -94,6 +91,8 @@ class Som(object):
 
         :param X: the data on which to train.
         :param num_epochs: the number of epochs for which to train.
+        :param init_pca: Whether to initialize the weights to the
+        first principal components of the input data.
         :param total_updates: The number of updates to the parameters to do
         during training.
         :param stop_lr_updates: A fraction, describing over which portion of
@@ -305,7 +304,6 @@ class Som(object):
          the differences between the input and the weights, which can be
          reused in the update calculation.
         """
-
         return self.distance_function(x, self.weights)
 
     def _calculate_update(self, x, influence):
@@ -318,14 +316,13 @@ class Som(object):
 
         Implicitly uses Oja's Rule: delta_W = alpha * (X - w)
 
-        In this case (X - w) has been precomputed for speed, in the function
-        _get_bmus.
+        In this case (X - w) has been precomputed for speed, in the
+        forward step.
 
         :param x: The input vector
         :param influence: The influence the result has on each unit,
         depending on distance. Already includes the learning rate.
         """
-
         return np.multiply(x, influence)
 
     def backward(self, x, influences, activation, **kwargs):
@@ -334,7 +331,7 @@ class Som(object):
 
         :param x: The input data
         :param influences: The influences at the current time-step
-        :param activation: The activation at the output
+        :param activation: The activation at the output layer
         :param kwargs:
         :return: None
         """
@@ -348,14 +345,17 @@ class Som(object):
 
         :param x: The input
         :param weights: The weights
-        :return: A matrix containing the distance between each
-        weight and each input.
+        :return: A tuple of matrices,
+        The first matrix is a (batch_size * neurons) matrix of
+        activation values, containing the response of each neuron
+        to each input
+        The second matrix is a (batch_size * neuron) matrix containing
+        the difference between euch neuron and each input.
         """
+        diff = self._distance_difference(x, weights)
+        activations = np.linalg.norm(diff, axis=-1)
 
-        dist = self._distance_difference(x, weights)
-        res = np.linalg.norm(dist, axis=-1)
-
-        return res, dist
+        return activations, diff
 
     def _distance_difference(self, x, weights):
         """
@@ -438,7 +438,7 @@ class Som(object):
         This function should not be directly used.
 
         :param X: The input data.
-        :return: An array of arrays, representing the activation
+        :return: A matrix, representing the activation
         each node has to each input.
         """
         batched = self._create_batches(X, batch_size)
