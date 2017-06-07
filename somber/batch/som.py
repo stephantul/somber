@@ -441,6 +441,7 @@ class Som(object):
         :return: A matrix, representing the activation
         each node has to each input.
         """
+
         batched = self._create_batches(X, batch_size)
 
         activations = []
@@ -450,6 +451,7 @@ class Som(object):
             activations.extend(activation)
 
         activations = np.asarray(activations, dtype=np.float32)
+        activations = activations[:X.shape[0]]
         return activations.reshape(X.shape[0], self.weight_dim)
 
     def predict(self, X, batch_size=100):

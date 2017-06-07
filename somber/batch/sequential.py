@@ -49,16 +49,7 @@ class Sequential(Som):
         :param X: The input data.
         :return: A matrix of the appropriate size for simulating contexts.
         """
-
-        z_ = X[-2, 1:]
-        z_ = np.vstack([np.zeros((1, self.data_dim)), z_])
-
-        z = X[-1, 1:]
-        z = np.vstack([np.zeros((1, self.data_dim)), z])
-        res, _ = self.distance_function(z_, self.weights)
-        p = self.min_max(res, 1)[1]
-        xo = self.forward(z, prev_activation=np.array(self.context_weights[p]))[0]
-        return np.zeros_like(xo)
+        return np.zeros((X.shape[0], self.weight_dim))
 
     def _create_batches(self, X, batch_size):
         """
@@ -107,6 +98,7 @@ class Sequential(Som):
             activations.append(activation)
 
         activations = np.asarray(activations, dtype=np.float32).transpose((1, 0, 2))
+        activations = activations[:X.shape[0]]
         return activations.reshape(X.shape[0], self.weight_dim)
 
 
