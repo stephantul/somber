@@ -6,7 +6,7 @@ from setuptools import find_packages
 
 
 setup(name='somber',
-      version='0.2.2',
+      version='0.3.0',
       description='Self-Organizing Maps in Numpy',
       author='Stéphan Tulkens',
       author_email='stephan.tulkens@uantwerpen.be',
