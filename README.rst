@@ -64,7 +64,7 @@ The color dataset comes from this nice `blog, <https://codesachin.wordpress.com/
        'darkgrey', 'mediumgrey', 'lightgrey']
 
   # initialize
-  s = Som((10, 10), dim=3, learning_rate=0.3)
+  s = Som((10, 10), data_dim=3, learning_rate=0.3)
 
   # train
   s.fit(X, num_epochs=100, total_updates=50)
