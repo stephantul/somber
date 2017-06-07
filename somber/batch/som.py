@@ -123,6 +123,8 @@ class Som(object):
             random = np.random.rand(self.weight_dim).reshape((self.weight_dim, 1))
             temp = np.outer(random, np.abs(np.max(X, axis=0) - min_))
             self.weights = np.asarray(min_ + temp, dtype=np.float32)
+        else:
+            self.weights = np.zeros(self.weights.shape)
 
         # The train length
         train_length = (len(X) * num_epochs) // batch_size
@@ -157,7 +159,8 @@ class Som(object):
             idx, nb_step, lr_step = self._epoch(X,
                                                 nb_update_counter,
                                                 lr_update_counter,
-                                                idx, nb_step,
+                                                idx,
+                                                nb_step,
                                                 lr_step,
                                                 show_progressbar)
 
@@ -275,6 +278,9 @@ class Som(object):
         self.progressbar_interval = 1
         self.progressbar_mult = batch_size
 
+        if batch_size > X.shape[0]:
+            batch_size = X.shape[0]
+
         max_x = int(np.ceil(X.shape[0] / batch_size))
         X = resize(X, (max_x, batch_size, self.data_dim))
 
@@ -337,7 +343,8 @@ class Som(object):
         """
 
         influence = self._apply_influences(activation, influences)
-        self.weights += self._calculate_update(x, influence).mean(0)
+        up = self._calculate_update(x, influence)
+        self.weights += up.mean(0)
 
     def distance_function(self, x, weights):
         """
@@ -353,7 +360,7 @@ class Som(object):
         the difference between euch neuron and each input.
         """
         diff = self._distance_difference(x, weights)
-        activations = np.linalg.norm(diff, axis=-1)
+        activations = np.linalg.norm(diff, axis=2)
 
         return activations, diff
 
@@ -387,15 +394,12 @@ class Som(object):
         Pre-calculate the influence for a given value of sigma.
 
         The neighborhood has size map_dim * map_dim, so for a 30 * 30 map,
-        the neighborhood will be size (900, 900). It is then duplicated
-        influence_size times, and reshaped into an
-        (map_dim, map_dim, influence_size) array.
-        This is done to facilitate fast calculation in subsequent steps.
+        the neighborhood will be size (900, 900).
 
         :param sigma: The neighborhood value.
-        :return: The neighborhood, reshaped into an array
+        :return: The neighborhood
         """
-        neighborhood = np.exp(-self.distance_grid / (2.0 * sigma ** 2))
+        neighborhood = np.exp(-1.0 * self.distance_grid / (2.0 * sigma ** 2))
         return neighborhood.reshape(self.weight_dim, self.weight_dim)[:, :, None]
 
     def _initialize_distance_grid(self):
@@ -405,7 +409,7 @@ class Som(object):
         :return:
         """
         p = [self._grid_distance(i) for i in range(self.weight_dim)]
-        return np.array(p, dtype=np.float32)
+        return np.array(p, dtype=np.float32).T
 
     def _grid_distance(self, index):
         """
@@ -424,12 +428,12 @@ class Som(object):
 
         # Fast way to construct distance matrix
         f = np.arange(0, self.weight_dim).reshape(self.map_dimensions)
-        x = np.abs(f % width - row)
-        y = np.abs(f % height - column).transpose(1, 0)
+        x = np.abs(f % width - row) ** 2
+        y = np.abs(f % height - column).transpose(1, 0) ** 2
 
         distance = x + y
 
-        return distance.ravel()
+        return distance
 
     def _predict_base(self, X, batch_size=100):
         """
@@ -556,7 +560,7 @@ class Som(object):
             distances = np.sum(np.square(differences), 1)
             node_match.append(names[np.argmin(distances)])
 
-        return np.array(node_match, dtype=np.float32)
+        return node_match
 
     def map_weights(self):
         """
@@ -566,8 +570,7 @@ class Som(object):
         """
         width, height = self.map_dimensions
         # Reshape to appropriate dimensions
-        view = self.weights.reshape((width, height, self.data_dim))
-        return view.T
+        return self.weights.reshape((width, height, self.data_dim)).transpose(1, 0, 2)
 
     @classmethod
     def load(cls, path):
