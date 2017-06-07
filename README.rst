@@ -34,9 +34,6 @@ Colors
 
 The color dataset comes from this nice `blog, <https://codesachin.wordpress.com/2015/11/28/self-organizing-maps-with-googles-tensorflow>`_
 
-
-'''''''
-
 .. code-block:: python
 
   import numpy as np
@@ -84,8 +81,6 @@ The color dataset comes from this nice `blog, <https://codesachin.wordpress.com/
   import matplotlib.pyplot as plt
 
   plt.imshow(mapped)
-
-'''''''
 
 TODO
 ----
