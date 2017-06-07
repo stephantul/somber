@@ -7,7 +7,6 @@ To the best of my knowledge, the sequential SOM algorithms implemented in this p
 The package currently contains implementations of:
 
   * Regular Som (SOM) (Kohonen, various publications)
-  * Recurrent Som (RSOM) ([Koskela et al., 1998](http://ieeexplore.ieee.org/document/725861/), among others)
   * Recursive Som (RecSOM) ([Voegtlin, 2002](http://www.sciencedirect.com/science/article/pii/S0893608002000722))
   * Merge Som (MSOM) ([Hammer and Strickert, 2005](http://www.sciencedirect.com/science/article/pii/S0925231204005107))
 
@@ -23,7 +22,7 @@ Unlike most sequence-based neural network packages, SOMBER doesn't use batches o
 
 This makes switching and comparing between non-sequential SOM and the sequential SOMs easy, as the SOM itself will decide whether to pay attention to what came before, and how it will pay attention to what came before.
 
-A consequence of representing everything as a single sequence is that the sequential SOMs assume everything in the sequence depends on what comes before, which might be unsuitable for your problem. 
+A consequence of representing everything as a single sequence is that the sequential SOMs assume everything in the sequence depends on what comes before, which might be unsuitable for your problem.
 
 ### Examples
 
@@ -32,7 +31,11 @@ A consequence of representing everything as a single sequence is that the sequen
 The color dataset comes from this nice [blog]( https://codesachin.wordpress.com/2015/11/28/self-organizing-maps-with-googles-tensorflow/
 )
 
-```python3
+
+'''''''
+
+.. code-block:: python
+
 import numpy as np
 
 from somber.batch.som import Som
@@ -79,7 +82,7 @@ import matplotlib.pyplot as plt
 
 plt.imshow(mapped)
 
-```
+'''''''
 
 ### TODO
 
