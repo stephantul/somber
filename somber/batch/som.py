@@ -127,6 +127,8 @@ class Som(object):
             self.weights = np.zeros(self.weights.shape)
 
         # The train length
+        if batch_size > len(X):
+            batch_size = len(X)
         train_length = (len(X) * num_epochs) // batch_size
 
         X = self._create_batches(X, batch_size)
@@ -515,11 +517,9 @@ class Som(object):
 
         for k, v in receptive_fields.items():
 
-            v = [x for x in v if np.any(x)]
+            v = [x for x in v if x]
 
             total = len(v)
-            v = ["".join([str(x_) for x_ in np.squeeze(x)]) for x in v]
-
             for row in reversed(list(zip(*v))):
 
                 r = Counter(row)

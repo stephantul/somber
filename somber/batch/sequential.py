@@ -49,7 +49,7 @@ class Sequential(Som):
         :param X: The input data.
         :return: A matrix of the appropriate size for simulating contexts.
         """
-        return np.zeros((X.shape[0], self.weight_dim))
+        return np.zeros((X.shape[1], self.weight_dim))
 
     def _create_batches(self, X, batch_size):
         """
@@ -65,9 +65,11 @@ class Sequential(Som):
         :param batch_size: The desired batch size.
         :return: A batched version of your data and a normed version of these batches.
         """
-
         self.progressbar_interval = 1
         self.progressbar_mult = batch_size
+
+        if batch_size > X.shape[0]:
+            batch_size = X.shape[0]
 
         max_x = int(np.ceil(X.shape[0] / batch_size))
         # This line first resizes the data to
