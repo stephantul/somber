@@ -87,7 +87,10 @@ class Som(object):
         (i.e. learning rate, neighborhood, not weights!)
         to perform during training.
 
-        In general, 1000 updates will do for most learning problems.
+        In general, 5 to 10 updates will do for most learning problems.
+        Doing updates to the neighborhood gets more expensive as the
+        size of the map increases. Hence, it is advisable to not make
+        the number of updates too big for your learning problem.
 
         :param X: the data on which to train.
         :param num_epochs: the number of epochs for which to train.
