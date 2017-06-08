@@ -107,7 +107,6 @@ class Som(object):
         :param seed: The random seed
         :return: None
         """
-
         X = np.asarray(X, dtype=np.float32)
 
         if X.ndim != 2:
@@ -343,7 +342,6 @@ class Som(object):
         :param kwargs:
         :return: None
         """
-
         influence = self._apply_influences(activation, influences)
         up = self._calculate_update(x, influence)
         self.weights += up.mean(0)
@@ -447,7 +445,6 @@ class Som(object):
         :return: A matrix, representing the activation
         each node has to each input.
         """
-
         batched = self._create_batches(X, batch_size)
 
         activations = []
@@ -505,7 +502,8 @@ class Som(object):
         :param batch_size: The batch size to use in prediction
         :return: The receptive field of each neuron.
         """
-        assert len(X) == len(identities)
+        if len(X) != len(identities):
+            raise ValueError("X and identities are not the same length: {0} and {1}".format(len(X), len(identities)))
 
         receptive_fields = defaultdict(list)
         predictions = self.predict(X, batch_size)
