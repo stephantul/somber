@@ -387,7 +387,6 @@ class Som(object):
         :return: The influence given the bmu, and the index of the bmu itself.
         """
         bmu = self.min_max(activations, 1)[1]
-        print(bmu, np.argmax(influences[bmu]))
         return influences[bmu]
 
     def _calculate_influence(self, sigma):
@@ -401,7 +400,6 @@ class Som(object):
         :return: The neighborhood
         """
         neighborhood = np.exp(-1.0 * self.distance_grid / (2.0 * sigma ** 2))
-        print(neighborhood.shape)
         return neighborhood.reshape(self.weight_dim, self.weight_dim)[:, :, None]
 
     def _initialize_distance_grid(self):
