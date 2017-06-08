@@ -1,6 +1,16 @@
 import logging
 import json
-import numpy as np
+
+from ..flags import Flags
+f = Flags()
+try:
+    if f['gpu']:
+        import cupy as np
+        np.cuda.Device(f['gpu']).use()
+    else:
+        import numpy as np
+except ImportError:
+    import numpy as np
 
 from .som import Som
 from ..utils import expo, linear, np_min, np_max, resize

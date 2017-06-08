@@ -2,7 +2,17 @@ import logging
 import time
 
 import json
-import numpy as np
+
+from ..flags import Flags
+f = Flags()
+try:
+    if f['gpu'] is not None:
+        import cupy as np
+        np.cuda.Device(f['gpu']).use()
+    else:
+        import numpy as np
+except ImportError:
+    import numpy as np
 
 from ..utils import progressbar, linear, expo, np_min, resize
 from functools import reduce
@@ -460,7 +470,11 @@ class Som(object):
         """
         batched = self._create_batches(X, batch_size)
 
-        activations = list(zip(*map(self.forward, batched)))[0]
+        activations = []
+
+        for x in batched:
+            activations.append(self.forward(x)[0])
+
         activations = np.asarray(activations, dtype=np.float32)
         activations = activations[:X.shape[0]]
         return activations.reshape(X.shape[0], self.weight_dim)
