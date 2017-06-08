@@ -132,8 +132,7 @@ class Som(object):
 
         X = self._create_batches(X, batch_size)
 
-        # The step size is the number of items between rough epochs.
-        # We use len instead of shape because len also works with np.flatiter
+        # The step size is the number of items between epochs.
         step_size_lr = max((train_length * stop_lr_updates) // total_updates, 1)
         step_size_nb = max((train_length * stop_nb_updates) // total_updates, 1)
 
@@ -146,6 +145,7 @@ class Som(object):
         nb_update_counter = set(np.arange(step_size_nb,
                                           (train_length * stop_nb_updates) + step_size_nb,
                                           step_size_nb).tolist())
+
         start = time.time()
 
         # Train
@@ -153,17 +153,28 @@ class Som(object):
         lr_step = 0
         idx = 0
 
+        map_radius = self.nbfunc(self.sigma,
+                                 0,
+                                 len(nb_update_counter))
+
+        learning_rate = self.lrfunc(self.learning_rate,
+                                    0,
+                                    len(lr_update_counter))
+
+        influences = self._calculate_influence(map_radius) * learning_rate
+
         for epoch in range(num_epochs):
 
             logger.info("Epoch {0} of {1}".format(epoch, num_epochs))
 
-            idx, nb_step, lr_step = self._epoch(X,
-                                                nb_update_counter,
-                                                lr_update_counter,
-                                                idx,
-                                                nb_step,
-                                                lr_step,
-                                                show_progressbar)
+            idx, nb_step, lr_step, influences = self._epoch(X,
+                                                            nb_update_counter,
+                                                            lr_update_counter,
+                                                            idx,
+                                                            nb_step,
+                                                            lr_step,
+                                                            show_progressbar,
+                                                            influences)
 
         self.trained = True
 
@@ -185,7 +196,8 @@ class Som(object):
                idx,
                nb_step,
                lr_step,
-               show_progressbar):
+               show_progressbar,
+               influences):
         """
         A single epoch.
 
@@ -221,8 +233,6 @@ class Som(object):
                                     lr_step,
                                     len(lr_update_counter))
 
-        influences = self._calculate_influence(map_radius) * learning_rate
-
         # Iterate over the training data
         for x in progressbar(X,
                              use=show_progressbar,
@@ -234,6 +244,7 @@ class Som(object):
                                               prev_activation=prev_activation)
 
             if idx in nb_update_counter:
+
                 nb_step += 1
 
                 map_radius = self.nbfunc(self.sigma,
@@ -260,7 +271,7 @@ class Som(object):
 
             idx += 1
 
-        return idx, nb_step, lr_step
+        return idx, nb_step, lr_step, influences
 
     def _create_batches(self, X, batch_size):
         """
@@ -446,12 +457,7 @@ class Som(object):
         """
         batched = self._create_batches(X, batch_size)
 
-        activations = []
-
-        for x in batched:
-            activation = self.forward(x)[0]
-            activations.extend(activation)
-
+        activations = list(zip(*map(self.forward, batched)))[0]
         activations = np.asarray(activations, dtype=np.float32)
         activations = activations[:X.shape[0]]
         return activations.reshape(X.shape[0], self.weight_dim)
