@@ -387,6 +387,7 @@ class Som(object):
         :return: The influence given the bmu, and the index of the bmu itself.
         """
         bmu = self.min_max(activations, 1)[1]
+        print(bmu, np.argmax(influences[bmu]))
         return influences[bmu]
 
     def _calculate_influence(self, sigma):
@@ -400,6 +401,7 @@ class Som(object):
         :return: The neighborhood
         """
         neighborhood = np.exp(-1.0 * self.distance_grid / (2.0 * sigma ** 2))
+        print(neighborhood.shape)
         return neighborhood.reshape(self.weight_dim, self.weight_dim)[:, :, None]
 
     def _initialize_distance_grid(self):
@@ -409,7 +411,7 @@ class Som(object):
         :return:
         """
         p = [self._grid_distance(i) for i in range(self.weight_dim)]
-        return np.array(p, dtype=np.float32).T
+        return np.array(p, dtype=np.float32)
 
     def _grid_distance(self, index):
         """
@@ -423,15 +425,14 @@ class Som(object):
         """
         width, height = self.map_dimensions
 
-        row = index // width
-        column = index % width
+        row = index // height
+        column = index % height
 
         # Fast way to construct distance matrix
-        f = np.arange(0, self.weight_dim).reshape(self.map_dimensions)
-        x = np.abs(f % width - row) ** 2
-        y = np.abs(f % height - column).transpose(1, 0) ** 2
+        x = np.abs(np.arange(width) - row) ** 2
+        y = np.abs(np.arange(height) - column) ** 2
 
-        distance = x + y
+        distance = x[:, None] + y[None, :]
 
         return distance
 
