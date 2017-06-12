@@ -1,6 +1,7 @@
 import logging
 import json
 import cupy as cp
+import numpy as np
 
 from .som import Som
 from ..utils import expo, linear, np_min, np_max, resize
@@ -42,6 +43,18 @@ class Sequential(Som):
                          nbfunc,
                          min_max)
 
+    def _ensure_params(self, X):
+        """
+        Ensure the parameters, i.e. the weights,
+        are of the correct type
+
+        :param X: The input data
+        :return: None
+        """
+        xp = cp.get_array_module(X)
+        self.weights = xp.asarray(self.weights, xp.float32)
+        self.context_weights = xp.asarray(self.context_weights, xp.float32)
+
     def _init_prev(self, X):
         """
         A safe initialization for the first previous value.
@@ -49,7 +62,8 @@ class Sequential(Som):
         :param X: The input data.
         :return: A matrix of the appropriate size for simulating contexts.
         """
-        return cp.zeros((X.shape[1], self.weight_dim))
+        xp = cp.get_array_module(X)
+        return xp.zeros((X.shape[1], self.weight_dim))
 
     def _create_batches(self, X, batch_size):
         """
@@ -65,13 +79,15 @@ class Sequential(Som):
         :param batch_size: The desired batch size.
         :return: A batched version of your data and a normed version of these batches.
         """
+        xp = cp.get_array_module(X)
+
         self.progressbar_interval = 1
         self.progressbar_mult = batch_size
 
         if batch_size > X.shape[0]:
             batch_size = X.shape[0]
 
-        max_x = int(cp.ceil(X.shape[0] / batch_size))
+        max_x = int(xp.ceil(X.shape[0] / batch_size))
         # This line first resizes the data to
         X = resize(X, (batch_size, max_x, self.data_dim))
         # Transposes it to (len(X) / batch_size, batch_size, data_dim)
@@ -89,6 +105,7 @@ class Sequential(Som):
         :return: An array of arrays, representing the activation
         each node has to each input.
         """
+        xp = cp.get_array_module(X)
         batched = self._create_batches(X, batch_size)
 
         activations = []
@@ -99,7 +116,7 @@ class Sequential(Som):
             activation = self.forward(x, prev_activation=activation)[0]
             activations.append(activation)
 
-        activations = cp.asarray(activations, dtype=cp.float32).transpose((1, 0, 2))
+        activations = xp.asarray(activations, dtype=xp.float32).transpose((1, 0, 2))
         activations = activations[:X.shape[0]]
         return activations.reshape(X.shape[0], self.weight_dim)
 
@@ -150,7 +167,7 @@ class Recursive(Sequential):
                          sigma,
                          min_max=np_max)
 
-        self.context_weights = cp.zeros((self.weight_dim, self.weight_dim), dtype=cp.float32)
+        self.context_weights = np.zeros((self.weight_dim, self.weight_dim), dtype=np.float32)
         self.alpha = alpha
         self.beta = beta
 
@@ -195,8 +212,8 @@ class Recursive(Sequential):
         distance_x, diff_x = self.distance_function(x, self.weights)
         distance_y, diff_y = self.distance_function(prev, self.context_weights)
 
-        x_ = cp.multiply(distance_x, self.alpha)
-        y_ = cp.multiply(distance_y, self.beta)
+        x_ = distance_x * self.alpha
+        y_ = distance_y * self.beta
         activation = cp.exp(-(x_ + y_))
 
         return activation, diff_x, diff_y
@@ -211,6 +228,7 @@ class Recursive(Sequential):
         :param kwargs:
         :return: None
         """
+        xp = cp.get_array_module(diff_x)
 
         diff_y = kwargs['difference_y']
         influence = self._apply_influences(activation, influences)
@@ -218,10 +236,10 @@ class Recursive(Sequential):
         x_update = self._calculate_update(diff_x, influence)
         self.weights += x_update.mean(0)
         y_update = self._calculate_update(diff_y, influence)
-        self.context_weights += cp.squeeze(y_update.mean(0))
+        self.context_weights += xp.squeeze(y_update.mean(0))
 
     @classmethod
-    def load(cls, path):
+    def load(cls, path, array_type=np):
         """
         Load a recursive SOM from a JSON file.
 
@@ -229,12 +247,13 @@ class Recursive(Sequential):
         If there are no context weights, the context weights will be set to 0.
 
         :param path: The path to the JSON file.
+        :param array_type: The type of array to load
         :return: A RecSOM.
         """
         data = json.load(open(path))
 
         weights = data['weights']
-        weights = cp.asarray(weights, dtype=cp.float32)
+        weights = array_type.asarray(weights, dtype=cp.float32)
         datadim = weights.shape[1]
 
         dimensions = data['dimensions']
@@ -245,9 +264,9 @@ class Recursive(Sequential):
 
         try:
             context_weights = data['context_weights']
-            context_weights = cp.asarray(context_weights, dtype=cp.float32)
+            context_weights = array_type.asarray(context_weights, dtype=cp.float32)
         except KeyError:
-            context_weights = cp.zeros((len(weights), len(weights)))
+            context_weights = array_type.zeros((len(weights), len(weights)))
 
         try:
             alpha = data['alpha']
@@ -335,7 +354,7 @@ class Merging(Sequential):
 
         self.alpha = alpha
         self.beta = beta
-        self.context_weights = cp.ones_like(self.weights)
+        self.context_weights = np.ones_like(self.weights)
         self.entropy = 0
 
     def _propagate(self, x, influences, **kwargs):
@@ -372,10 +391,12 @@ class Merging(Sequential):
         :param prev_update: The previous update, used as a momentum term.
         :return:
         """
-        prev_bmus = cp.array(list(prev_bmus.values()), dtype=cp.float32)
-        prev_bmus = prev_bmus / cp.sum(prev_bmus)
+        xp = cp.get_array_module(prev_bmus)
 
-        new_entropy = -cp.sum(prev_bmus * cp.nan_to_num(cp.log2(prev_bmus)))
+        prev_bmus = xp.array(list(prev_bmus.values()), dtype=xp.float32)
+        prev_bmus = prev_bmus / xp.sum(prev_bmus)
+
+        new_entropy = -xp.sum(prev_bmus * xp.nan_to_num(cp.log2(prev_bmus)))
         entropy_diff = (new_entropy - self.entropy)
 
         update = (entropy_diff * 0.1) + (prev_update * 0.9)
@@ -393,6 +414,7 @@ class Merging(Sequential):
         :param x: The input vector
         :return: An integer, representing the index of the best matching unit.
         """
+        xp = cp.get_array_module()
         # Differences is the components of the weights
         # subtracted from the weight vector.
 
@@ -400,14 +422,14 @@ class Merging(Sequential):
         context = (1 - self.beta) * self.weights[prev_bmu] + self.beta * self.context_weights[prev_bmu]
 
         distances_x, diff_x = self.distance_function(x,
-                                             self.weights)
+                                                     self.weights)
 
         distances_y, diff_y = self.distance_function(context,
-                                             self.context_weights)
+                                                     self.context_weights)
 
         # BMU is based on a weighted addition of current and
         # previous activation.
-        activations = cp.multiply(distances_x, 1 - self.alpha) + cp.multiply(distances_y, self.alpha)
+        activations = (distances_x * 1 - self.alpha) + (distances_y * self.alpha)
 
         return activations, diff_x, diff_y
 
@@ -424,8 +446,8 @@ class Merging(Sequential):
 
         diff_y = kwargs['difference_y']
         influence = self._apply_influences(activation, influences)
-        self.weights += cp.mean(self._calculate_update(diff_x, influence), 0)
-        self.context_weights += cp.mean(self._calculate_update(diff_y, influence), 0)
+        self.weights += self._calculate_update(diff_x, influence).mean(0)
+        self.context_weights += self._calculate_update(diff_y, influence).mean(0)
 
     def _predict_base(self, X, batch_size=1):
         """
@@ -435,6 +457,7 @@ class Merging(Sequential):
         :return: A matrix, representing the activation
         each node has to each input.
         """
+        xp = cp.get_array_module(X)
         X = self._create_batches(X, batch_size=batch_size)
         distances = []
 
@@ -445,10 +468,10 @@ class Merging(Sequential):
             prev_activation = self.forward(x, prev_activation=prev_activation)[0]
             distances.extend(prev_activation)
 
-        return cp.array(distances, dtype=cp.float32)
+        return xp.array(distances, dtype=xp.float32)
 
     @classmethod
-    def load(cls, path):
+    def load(cls, path, array_type=np):
         """
         Loads a SOM from a JSON file.
 
@@ -456,13 +479,14 @@ class Merging(Sequential):
         in the loaded JSON will be initialized to sane values.
 
         :param path: The path to the JSON file.
+        :param array_type: The array type to use.
         :return: A trained mergeSom.
         """
 
         data = json.load(open(path))
 
         weights = data['weights']
-        weights = cp.array(weights, dtype=cp.float32)
+        weights = array_type.array(weights, dtype=cp.float32)
 
         datadim = weights.shape[1]
         dimensions = data['dimensions']
@@ -474,9 +498,9 @@ class Merging(Sequential):
 
         try:
             context_weights = data['context_weights']
-            context_weights = cp.array(context_weights, dtype=cp.float32)
+            context_weights = array_type.array(context_weights, dtype=cp.float32)
         except KeyError:
-            context_weights = cp.ones(weights.shape)
+            context_weights = array_type.ones(weights.shape)
 
         try:
             alpha = data['alpha']

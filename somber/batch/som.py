@@ -3,6 +3,7 @@ import time
 
 import json
 import cupy as cp
+import numpy as np
 
 from ..utils import progressbar, linear, expo, np_min, resize
 from functools import reduce
@@ -49,12 +50,12 @@ class Som(object):
 
         # The dimensionality of the weight vector
         # Usually (width * height)
-        self.weight_dim = int(reduce(cp.multiply, map_dim, 1))
+        self.weight_dim = int(reduce(np.multiply, map_dim, 1))
 
         # Weights are initialized to small random values.
         # Initializing to more appropriate values given the dataset
         # will probably give faster convergence.
-        self.weights = cp.zeros((self.weight_dim, data_dim))
+        self.weights = np.zeros((self.weight_dim, data_dim))
         self.data_dim = data_dim
 
         # The function used to diminish the learning rate.
@@ -110,7 +111,9 @@ class Som(object):
         :param seed: The random seed
         :return: None
         """
-        X = cp.asarray(X, dtype=cp.float32)
+        xp = cp.get_array_module(X)
+
+        X = xp.asarray(X, dtype=xp.float32)
 
         if X.ndim != 2:
             raise ValueError("Your data is not a 2D matrix. Actual size: {0}".format(X.shape))
@@ -118,17 +121,16 @@ class Som(object):
         if X.shape[1] != self.data_dim:
             raise ValueError("Your data size != weight dim: {0}, expected {1}".format(X.shape[1], self.data_dim))
 
-        cp.random.seed(seed)
+        xp.random.seed(seed)
+        self.sigma = xp.float32(self.sigma)
 
         if init_pca:
-            min_ = cp.min(X, axis=0)
-            random = cp.random.rand(self.weight_dim).reshape((self.weight_dim, 1))
-            temp = cp.outer(random, cp.abs(cp.max(X, axis=0) - min_))
-            self.weights = cp.asarray(min_ + temp, dtype=cp.float32)
+            min_ = X.min(axis=0)
+            random = xp.random.rand(self.weight_dim).reshape((self.weight_dim, 1))
+            temp = xp.outer(random, cp.abs(cp.max(X, axis=0) - min_))
+            self.weights = xp.asarray(min_ + temp, dtype=xp.float32)
         else:
-            self.weights = cp.zeros(self.weights.shape)
-
-        print(self.weights.device)
+            self.weights = xp.zeros(self.weights.shape)
 
         # The train length
         if batch_size > len(X):
@@ -136,6 +138,7 @@ class Som(object):
         train_length = (len(X) * num_epochs) // batch_size
 
         X = self._create_batches(X, batch_size)
+        self._ensure_params(X)
 
         # The step size is the number of items between epochs.
         step_size_lr = max((train_length * stop_lr_updates) // total_updates, 1)
@@ -143,11 +146,11 @@ class Som(object):
 
         # Precalculate the number of updates.
         # Precalculate the number of updates.
-        lr_update_counter = set(cp.arange(step_size_lr,
+        lr_update_counter = set(xp.arange(step_size_lr,
                                           (train_length * stop_lr_updates) + step_size_lr,
                                           step_size_lr).tolist())
 
-        nb_update_counter = set(cp.arange(step_size_nb,
+        nb_update_counter = set(xp.arange(step_size_nb,
                                           (train_length * stop_nb_updates) + step_size_nb,
                                           step_size_nb).tolist())
 
@@ -184,6 +187,17 @@ class Som(object):
         self.trained = True
 
         logger.info("Total train time: {0}".format(time.time() - start))
+
+    def _ensure_params(self, X):
+        """
+        Function to ensure the params, i.e. the weights, are
+        of the correct type.
+
+        :param X: The input data
+        :return: None
+        """
+        xp = cp.get_array_module(X)
+        self.weights = xp.asarray(self.weights, xp.float32)
 
     def _init_prev(self, X):
         """
@@ -230,10 +244,6 @@ class Som(object):
         prev_activation = self._init_prev(X)
 
         # Calculate the influences for update 0.
-        map_radius = self.nbfunc(self.sigma,
-                                 nb_step,
-                                 len(nb_update_counter))
-
         learning_rate = self.lrfunc(self.learning_rate,
                                     lr_step,
                                     len(lr_update_counter))
@@ -292,13 +302,15 @@ class Som(object):
         :param batch_size: The desired batch size.
         :return: A batched version of your data.
         """
+        xp = cp.get_array_module(X)
+
         self.progressbar_interval = 1
         self.progressbar_mult = batch_size
 
         if batch_size > X.shape[0]:
             batch_size = X.shape[0]
 
-        max_x = int(cp.ceil(X.shape[0] / batch_size))
+        max_x = int(xp.ceil(X.shape[0] / batch_size))
         X = resize(X, (max_x, batch_size, self.data_dim))
 
         return X
@@ -346,7 +358,8 @@ class Som(object):
         :param influence: The influence the result has on each unit,
         depending on distance. Already includes the learning rate.
         """
-        return cp.multiply(x, influence)
+        xp = cp.get_array_module(x)
+        return xp.multiply(x, influence)
 
     def backward(self, x, influences, activation, **kwargs):
         """
@@ -375,8 +388,9 @@ class Som(object):
         The second matrix is a (batch_size * neuron) matrix containing
         the difference between euch neuron and each input.
         """
+        xp = cp.get_array_module(x)
         diff = self._distance_difference(x, weights)
-        activations = cp.linalg.norm(diff, axis=2)
+        activations = xp.linalg.norm(diff, axis=2)
 
         return activations, diff
 
@@ -403,6 +417,8 @@ class Som(object):
         :return: The influence given the bmu, and the index of the bmu itself.
         """
         bmu = self.min_max(activations, 1)[1]
+        xp = cp.get_array_module(activations)
+        influences = xp.asarray(influences, dtype=xp.float32)
         return influences[bmu]
 
     def _calculate_influence(self, sigma):
@@ -410,12 +426,13 @@ class Som(object):
         Pre-calculate the influence for a given value of sigma.
 
         The neighborhood has size map_dim * map_dim, so for a 30 * 30 map,
-        the neighborhood will be size (900, 900).
+        the neighborhood will be size (900, 900).  d
 
         :param sigma: The neighborhood value.
         :return: The neighborhood
         """
-        neighborhood = cp.exp(-self.distance_grid / (2.0 * sigma ** 2))
+        xp = cp.get_array_module(self.distance_grid)
+        neighborhood = xp.exp(-self.distance_grid / (2.0 * sigma ** 2))
         return neighborhood.reshape(self.weight_dim, self.weight_dim)[:, :, None]
 
     def _initialize_distance_grid(self):
@@ -425,7 +442,7 @@ class Som(object):
         :return:
         """
         p = [self._grid_distance(i) for i in range(self.weight_dim)]
-        return cp.array(p, dtype=cp.float32)
+        return np.array(p, dtype=np.float32)
 
     def _grid_distance(self, index):
         """
@@ -443,8 +460,8 @@ class Som(object):
         column = index % height
 
         # Fast way to construct distance matrix
-        x = cp.abs(cp.arange(width) - row) ** 2
-        y = cp.abs(cp.arange(height) - column) ** 2
+        x = np.abs(np.arange(width) - row) ** 2
+        y = np.abs(np.arange(height) - column) ** 2
 
         distance = x[:, None] + y[None, :]
 
@@ -460,6 +477,7 @@ class Som(object):
         :return: A matrix, representing the activation
         each node has to each input.
         """
+        xp = cp.get_array_module()
         batched = self._create_batches(X, batch_size)
 
         activations = []
@@ -467,7 +485,7 @@ class Som(object):
         for x in batched:
             activations.append(self.forward(x)[0])
 
-        activations = cp.asarray(activations, dtype=cp.float32)
+        activations = xp.asarray(activations, dtype=xp.float32)
         activations = activations[:X.shape[0]]
         return activations.reshape(X.shape[0], self.weight_dim)
 
@@ -480,7 +498,12 @@ class Som(object):
         :return: The index of the bmu which best describes the input data.
         """
         dist = self._predict_base(X, batch_size)
-        return self.min_max(dist, 1)[1]
+        res = self.min_max(dist, 1)[1]
+        xp = cp.get_array_module(res)
+        if xp == np:
+            return res
+        else:
+            return res.get()
 
     def quant_error(self, X):
         """
@@ -494,7 +517,12 @@ class Som(object):
         for each data point.
         """
         dist = self._predict_base(X)
-        return self.min_max(dist, 1)[0]
+        res = self.min_max(dist, 1)[0]
+        xp = cp.get_array_module(res)
+        if xp == np:
+            return res
+        else:
+            return res.get()
 
     def receptive_field(self, X, identities, max_len=10, threshold=0.9, batch_size=1):
         """
@@ -557,20 +585,35 @@ class Som(object):
         input datum, must be same length as X
         :return: A numpy array with identities, the shape of the map.
         """
+        xp = cp.get_array_module(X)
+
         if len(X) != len(identities):
             raise ValueError("X and identities are not the same length: {0} and {1}".format(len(X), len(identities)))
 
         # Remove all duplicates from X
-        X_unique, names = zip(*set([tuple((tuple(s), n)) for s, n in zip(X, identities)]))
-        node_match = []
+        X_unique, names = list(), set()
+        for idx, name in enumerate(identities):
+            if name not in names:
+                names.add(name)
+                X_unique.append(idx)
 
-        X_unique = cp.array(X_unique, dtype=cp.float32)
+        X_unique = X[X_unique]
+        names = list(names)
+
+        node_match = []
 
         for node in self.weights:
 
             differences = node - X_unique
-            distances = cp.sum(cp.square(differences), 1)
-            node_match.append(names[cp.argmin(distances)])
+            distances = xp.linalg.norm(differences, axis=1)
+            # Ugly line to make the work on both CPU and GPU.
+            # cupy returns arrays for vectors on which argmin
+            # called, so we use another min on the resulting
+            if xp != np:
+                distances = distances.get()
+
+            x = distances.argmin()
+            node_match.append(names[x])
 
         return node_match
 
@@ -585,18 +628,19 @@ class Som(object):
         return self.weights.reshape((width, height, self.data_dim)).transpose(1, 0, 2)
 
     @classmethod
-    def load(cls, path):
+    def load(cls, path, array_type=np):
         """
         Loads a SOM from a JSON file.
 
         :param path: The path to the JSON file.
         :return: A SOM.
         """
+        xp = cp.get_array_module()
 
         data = json.load(open(path))
 
         weights = data['weights']
-        weights = cp.asarray(weights, dtype=cp.float32)
+        weights = xp.asarray(weights, dtype=xp.float32)
         datadim = weights.shape[1]
 
         dimensions = data['dimensions']
