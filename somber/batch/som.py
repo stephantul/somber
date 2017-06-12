@@ -367,8 +367,8 @@ class Som(object):
         :return: None
         """
         influence = self._apply_influences(activation, influences)
-        up = self._calculate_update(x, influence)
-        self.weights += up.mean(0)
+        update = self._calculate_update(x, influence)
+        self.weights += update.mean(0)
 
     def distance_function(self, x, weights):
         """
@@ -423,7 +423,7 @@ class Som(object):
         :param sigma: The neighborhood value.
         :return: The neighborhood
         """
-        neighborhood = np.exp(-1.0 * self.distance_grid / (2.0 * sigma ** 2))
+        neighborhood = np.exp(-self.distance_grid / (2.0 * sigma ** 2))
         return neighborhood.reshape(self.weight_dim, self.weight_dim)[:, :, None]
 
     def _initialize_distance_grid(self):

@@ -205,7 +205,10 @@ class Recursive(Sequential):
         distance_x, diff_x = self.distance_function(x, self.weights)
         distance_y, diff_y = self.distance_function(prev, self.context_weights)
 
-        activation = np.exp(-(np.multiply(distance_x, self.alpha) + np.multiply(distance_y, self.beta)))
+        x_ = np.multiply(distance_x, self.alpha)
+        y_ = np.multiply(distance_y, self.beta)
+        activation = np.exp(-(x_ + y_))
+
         return activation, diff_x, diff_y
 
     def backward(self, diff_x, influences, activation, **kwargs):
@@ -222,10 +225,10 @@ class Recursive(Sequential):
         diff_y = kwargs['difference_y']
         influence = self._apply_influences(activation, influences)
         # Update
-
-        self.weights += np.mean(self._calculate_update(diff_x, influence), 0)
-        res = np.squeeze(np.mean(self._calculate_update(diff_y, influence), 0))
-        self.context_weights += res
+        x_update = self._calculate_update(diff_x, influence)
+        self.weights += x_update.mean(0)
+        y_update = self._calculate_update(diff_y, influence)
+        self.context_weights += np.squeeze(y_update.mean(0))
 
     @classmethod
     def load(cls, path):
