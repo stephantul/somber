@@ -1,20 +1,6 @@
 import logging
 import json
-<<<<<<< HEAD
-import cupy as np
-=======
-
-from ..flags import Flags
-f = Flags()
-try:
-    if f['gpu']:
-        import cupy as np
-        np.cuda.Device(f['gpu']).use()
-    else:
-        import numpy as np
-except ImportError:
-    import numpy as np
->>>>>>> master
+import cupy as cp
 
 from .som import Som
 from ..utils import expo, linear, np_min, np_max, resize
@@ -63,7 +49,7 @@ class Sequential(Som):
         :param X: The input data.
         :return: A matrix of the appropriate size for simulating contexts.
         """
-        return np.zeros((X.shape[1], self.weight_dim))
+        return cp.zeros((X.shape[1], self.weight_dim))
 
     def _create_batches(self, X, batch_size):
         """
@@ -85,7 +71,7 @@ class Sequential(Som):
         if batch_size > X.shape[0]:
             batch_size = X.shape[0]
 
-        max_x = int(np.ceil(X.shape[0] / batch_size))
+        max_x = int(cp.ceil(X.shape[0] / batch_size))
         # This line first resizes the data to
         X = resize(X, (batch_size, max_x, self.data_dim))
         # Transposes it to (len(X) / batch_size, batch_size, data_dim)
@@ -113,7 +99,7 @@ class Sequential(Som):
             activation = self.forward(x, prev_activation=activation)[0]
             activations.append(activation)
 
-        activations = np.asarray(activations, dtype=np.float32).transpose((1, 0, 2))
+        activations = cp.asarray(activations, dtype=cp.float32).transpose((1, 0, 2))
         activations = activations[:X.shape[0]]
         return activations.reshape(X.shape[0], self.weight_dim)
 
@@ -164,7 +150,7 @@ class Recursive(Sequential):
                          sigma,
                          min_max=np_max)
 
-        self.context_weights = np.zeros((self.weight_dim, self.weight_dim), dtype=np.float32)
+        self.context_weights = cp.zeros((self.weight_dim, self.weight_dim), dtype=cp.float32)
         self.alpha = alpha
         self.beta = beta
 
@@ -209,9 +195,9 @@ class Recursive(Sequential):
         distance_x, diff_x = self.distance_function(x, self.weights)
         distance_y, diff_y = self.distance_function(prev, self.context_weights)
 
-        x_ = np.multiply(distance_x, self.alpha)
-        y_ = np.multiply(distance_y, self.beta)
-        activation = np.exp(-(x_ + y_))
+        x_ = cp.multiply(distance_x, self.alpha)
+        y_ = cp.multiply(distance_y, self.beta)
+        activation = cp.exp(-(x_ + y_))
 
         return activation, diff_x, diff_y
 
@@ -232,7 +218,7 @@ class Recursive(Sequential):
         x_update = self._calculate_update(diff_x, influence)
         self.weights += x_update.mean(0)
         y_update = self._calculate_update(diff_y, influence)
-        self.context_weights += np.squeeze(y_update.mean(0))
+        self.context_weights += cp.squeeze(y_update.mean(0))
 
     @classmethod
     def load(cls, path):
@@ -248,7 +234,7 @@ class Recursive(Sequential):
         data = json.load(open(path))
 
         weights = data['weights']
-        weights = np.asarray(weights, dtype=np.float32)
+        weights = cp.asarray(weights, dtype=cp.float32)
         datadim = weights.shape[1]
 
         dimensions = data['dimensions']
@@ -259,9 +245,9 @@ class Recursive(Sequential):
 
         try:
             context_weights = data['context_weights']
-            context_weights = np.asarray(context_weights, dtype=np.float32)
+            context_weights = cp.asarray(context_weights, dtype=cp.float32)
         except KeyError:
-            context_weights = np.zeros((len(weights), len(weights)))
+            context_weights = cp.zeros((len(weights), len(weights)))
 
         try:
             alpha = data['alpha']
@@ -349,7 +335,7 @@ class Merging(Sequential):
 
         self.alpha = alpha
         self.beta = beta
-        self.context_weights = np.ones_like(self.weights)
+        self.context_weights = cp.ones_like(self.weights)
         self.entropy = 0
 
     def _propagate(self, x, influences, **kwargs):
@@ -386,10 +372,10 @@ class Merging(Sequential):
         :param prev_update: The previous update, used as a momentum term.
         :return:
         """
-        prev_bmus = np.array(list(prev_bmus.values()), dtype=np.float32)
-        prev_bmus = prev_bmus / np.sum(prev_bmus)
+        prev_bmus = cp.array(list(prev_bmus.values()), dtype=cp.float32)
+        prev_bmus = prev_bmus / cp.sum(prev_bmus)
 
-        new_entropy = -np.sum(prev_bmus * np.nan_to_num(np.log2(prev_bmus)))
+        new_entropy = -cp.sum(prev_bmus * cp.nan_to_num(cp.log2(prev_bmus)))
         entropy_diff = (new_entropy - self.entropy)
 
         update = (entropy_diff * 0.1) + (prev_update * 0.9)
@@ -421,7 +407,7 @@ class Merging(Sequential):
 
         # BMU is based on a weighted addition of current and
         # previous activation.
-        activations = np.multiply(distances_x, 1 - self.alpha) + np.multiply(distances_y, self.alpha)
+        activations = cp.multiply(distances_x, 1 - self.alpha) + cp.multiply(distances_y, self.alpha)
 
         return activations, diff_x, diff_y
 
@@ -438,8 +424,8 @@ class Merging(Sequential):
 
         diff_y = kwargs['difference_y']
         influence = self._apply_influences(activation, influences)
-        self.weights += np.mean(self._calculate_update(diff_x, influence), 0)
-        self.context_weights += np.mean(self._calculate_update(diff_y, influence), 0)
+        self.weights += cp.mean(self._calculate_update(diff_x, influence), 0)
+        self.context_weights += cp.mean(self._calculate_update(diff_y, influence), 0)
 
     def _predict_base(self, X, batch_size=1):
         """
@@ -459,7 +445,7 @@ class Merging(Sequential):
             prev_activation = self.forward(x, prev_activation=prev_activation)[0]
             distances.extend(prev_activation)
 
-        return np.array(distances, dtype=np.float32)
+        return cp.array(distances, dtype=cp.float32)
 
     @classmethod
     def load(cls, path):
@@ -476,7 +462,7 @@ class Merging(Sequential):
         data = json.load(open(path))
 
         weights = data['weights']
-        weights = np.array(weights, dtype=np.float32)
+        weights = cp.array(weights, dtype=cp.float32)
 
         datadim = weights.shape[1]
         dimensions = data['dimensions']
@@ -488,9 +474,9 @@ class Merging(Sequential):
 
         try:
             context_weights = data['context_weights']
-            context_weights = np.array(context_weights, dtype=np.float32)
+            context_weights = cp.array(context_weights, dtype=cp.float32)
         except KeyError:
-            context_weights = np.ones(weights.shape)
+            context_weights = cp.ones(weights.shape)
 
         try:
             alpha = data['alpha']

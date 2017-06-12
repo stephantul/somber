@@ -2,21 +2,7 @@ import logging
 import time
 
 import json
-<<<<<<< HEAD
-import cupy as np
-=======
->>>>>>> master
-
-from ..flags import Flags
-f = Flags()
-try:
-    if f['gpu'] is not None:
-        import cupy as np
-        np.cuda.Device(f['gpu']).use()
-    else:
-        import numpy as np
-except ImportError:
-    import numpy as np
+import cupy as cp
 
 from ..utils import progressbar, linear, expo, np_min, resize
 from functools import reduce
@@ -63,12 +49,12 @@ class Som(object):
 
         # The dimensionality of the weight vector
         # Usually (width * height)
-        self.weight_dim = int(reduce(np.multiply, map_dim, 1))
+        self.weight_dim = int(reduce(cp.multiply, map_dim, 1))
 
         # Weights are initialized to small random values.
         # Initializing to more appropriate values given the dataset
         # will probably give faster convergence.
-        self.weights = np.zeros((self.weight_dim, data_dim))
+        self.weights = cp.zeros((self.weight_dim, data_dim))
         self.data_dim = data_dim
 
         # The function used to diminish the learning rate.
@@ -124,7 +110,7 @@ class Som(object):
         :param seed: The random seed
         :return: None
         """
-        X = np.asarray(X, dtype=np.float32)
+        X = cp.asarray(X, dtype=cp.float32)
 
         if X.ndim != 2:
             raise ValueError("Your data is not a 2D matrix. Actual size: {0}".format(X.shape))
@@ -132,15 +118,17 @@ class Som(object):
         if X.shape[1] != self.data_dim:
             raise ValueError("Your data size != weight dim: {0}, expected {1}".format(X.shape[1], self.data_dim))
 
-        np.random.seed(seed)
+        cp.random.seed(seed)
 
         if init_pca:
-            min_ = np.min(X, axis=0)
-            random = np.random.rand(self.weight_dim).reshape((self.weight_dim, 1))
-            temp = np.outer(random, np.abs(np.max(X, axis=0) - min_))
-            self.weights = np.asarray(min_ + temp, dtype=np.float32)
+            min_ = cp.min(X, axis=0)
+            random = cp.random.rand(self.weight_dim).reshape((self.weight_dim, 1))
+            temp = cp.outer(random, cp.abs(cp.max(X, axis=0) - min_))
+            self.weights = cp.asarray(min_ + temp, dtype=cp.float32)
         else:
-            self.weights = np.zeros(self.weights.shape)
+            self.weights = cp.zeros(self.weights.shape)
+
+        print(self.weights.device)
 
         # The train length
         if batch_size > len(X):
@@ -155,11 +143,11 @@ class Som(object):
 
         # Precalculate the number of updates.
         # Precalculate the number of updates.
-        lr_update_counter = set(np.arange(step_size_lr,
+        lr_update_counter = set(cp.arange(step_size_lr,
                                           (train_length * stop_lr_updates) + step_size_lr,
                                           step_size_lr).tolist())
 
-        nb_update_counter = set(np.arange(step_size_nb,
+        nb_update_counter = set(cp.arange(step_size_nb,
                                           (train_length * stop_nb_updates) + step_size_nb,
                                           step_size_nb).tolist())
 
@@ -310,7 +298,7 @@ class Som(object):
         if batch_size > X.shape[0]:
             batch_size = X.shape[0]
 
-        max_x = int(np.ceil(X.shape[0] / batch_size))
+        max_x = int(cp.ceil(X.shape[0] / batch_size))
         X = resize(X, (max_x, batch_size, self.data_dim))
 
         return X
@@ -358,7 +346,7 @@ class Som(object):
         :param influence: The influence the result has on each unit,
         depending on distance. Already includes the learning rate.
         """
-        return np.multiply(x, influence)
+        return cp.multiply(x, influence)
 
     def backward(self, x, influences, activation, **kwargs):
         """
@@ -388,7 +376,7 @@ class Som(object):
         the difference between euch neuron and each input.
         """
         diff = self._distance_difference(x, weights)
-        activations = np.linalg.norm(diff, axis=2)
+        activations = cp.linalg.norm(diff, axis=2)
 
         return activations, diff
 
@@ -401,29 +389,6 @@ class Som(object):
         :return: A vector of differences.
         """
         return x[:, None, :] - weights[None, :, :]
-<<<<<<< HEAD
-
-    def _predict_base(self, X):
-        """
-        Predict distances to some input data.
-
-        This function should not be directly used.
-
-        :param X: The input data.
-        :return: An array of arrays, representing the activation
-        each node has to each input.
-        """
-        X = self._create_batches(X, 1)
-
-        activations = []
-
-        for x in zip(X):
-            activation = self.forward(x)[0]
-            activations.extend(activation)
-
-        return np.array(activations, dtype=np.float32)
-=======
->>>>>>> master
 
     def _apply_influences(self, activations, influences):
         """
@@ -450,7 +415,7 @@ class Som(object):
         :param sigma: The neighborhood value.
         :return: The neighborhood
         """
-        neighborhood = np.exp(-self.distance_grid / (2.0 * sigma ** 2))
+        neighborhood = cp.exp(-self.distance_grid / (2.0 * sigma ** 2))
         return neighborhood.reshape(self.weight_dim, self.weight_dim)[:, :, None]
 
     def _initialize_distance_grid(self):
@@ -460,7 +425,7 @@ class Som(object):
         :return:
         """
         p = [self._grid_distance(i) for i in range(self.weight_dim)]
-        return np.array(p, dtype=np.float32)
+        return cp.array(p, dtype=cp.float32)
 
     def _grid_distance(self, index):
         """
@@ -478,8 +443,8 @@ class Som(object):
         column = index % height
 
         # Fast way to construct distance matrix
-        x = np.abs(np.arange(width) - row) ** 2
-        y = np.abs(np.arange(height) - column) ** 2
+        x = cp.abs(cp.arange(width) - row) ** 2
+        y = cp.abs(cp.arange(height) - column) ** 2
 
         distance = x[:, None] + y[None, :]
 
@@ -502,7 +467,7 @@ class Som(object):
         for x in batched:
             activations.append(self.forward(x)[0])
 
-        activations = np.asarray(activations, dtype=np.float32)
+        activations = cp.asarray(activations, dtype=cp.float32)
         activations = activations[:X.shape[0]]
         return activations.reshape(X.shape[0], self.weight_dim)
 
@@ -599,13 +564,13 @@ class Som(object):
         X_unique, names = zip(*set([tuple((tuple(s), n)) for s, n in zip(X, identities)]))
         node_match = []
 
-        X_unique = np.array(X_unique, dtype=np.float32)
+        X_unique = cp.array(X_unique, dtype=cp.float32)
 
         for node in self.weights:
 
             differences = node - X_unique
-            distances = np.sum(np.square(differences), 1)
-            node_match.append(names[np.argmin(distances)])
+            distances = cp.sum(cp.square(differences), 1)
+            node_match.append(names[cp.argmin(distances)])
 
         return node_match
 
@@ -631,7 +596,7 @@ class Som(object):
         data = json.load(open(path))
 
         weights = data['weights']
-        weights = np.asarray(weights, dtype=np.float32)
+        weights = cp.asarray(weights, dtype=cp.float32)
         datadim = weights.shape[1]
 
         dimensions = data['dimensions']

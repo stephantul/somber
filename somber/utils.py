@@ -1,20 +1,6 @@
 import time
 import sys
-<<<<<<< HEAD
-import cupy as np
-=======
-
-from .flags import Flags
-f = Flags()
-try:
-    if f['gpu']:
-        import cupy as np
-        np.cuda.Device(f['gpu']).use()
-    else:
-        import numpy as np
-except ImportError:
-    import numpy as np
->>>>>>> master
+import cupy as cp
 
 from functools import partial
 
@@ -26,8 +12,8 @@ def np_minmax(func1, func2, X, axis=None):
     else:
         return func1(X, axis), func2(X, axis)
 
-np_min = partial(np_minmax, np.min, np.argmin)
-np_max = partial(np_minmax, np.max, np.argmax)
+np_min = partial(np_minmax, cp.get_array_module().min, cp.get_array_module().argmin)
+np_max = partial(np_minmax, cp.get_array_module().max, cp.get_array_module().argmax)
 
 
 def resize(X, new_shape):
@@ -45,7 +31,7 @@ def resize(X, new_shape):
     length_diff = (new_shape[0] * new_shape[1]) - len(X)
 
     # Pad input data with zeros
-    z = np.concatenate([X, np.zeros((length_diff, X.shape[1]))])
+    z = cp.concatenate([X, cp.zeros((length_diff, X.shape[1]))])
 
     # Reshape
     return z.reshape(new_shape)
@@ -62,7 +48,7 @@ def expo(value, current_step, total_steps):
     :param total_steps: The maximum number of steps.
     :return:
     """
-    return value * np.exp(-2.5 * (current_step / total_steps))
+    return value * cp.exp(-2.5 * (current_step / total_steps))
 
 
 def static(value, current_step, total_steps):
@@ -137,7 +123,7 @@ def progressbar(target,
         sys.stdout.write("\b" * prev_total_width)
         sys.stdout.write("\r")
 
-        numdigits = int(np.floor(np.log10(iter_length))) + 1
+        numdigits = int(cp.floor(cp.log10(iter_length))) + 1
         barstr = '%%%dd/%%%dd [' % (numdigits, numdigits)
         bar = barstr % (current * mult, iter_length * mult)
         prog = float(current) / iter_length
@@ -186,7 +172,7 @@ def progressbar(target,
             sys.stdout.write("\b" * prev_total_width)
             sys.stdout.write("\r")
 
-            numdigits = int(np.floor(np.log10(iter_length))) + 1
+            numdigits = int(cp.floor(cp.log10(iter_length))) + 1
             barstr = '%%%dd/%%%dd [' % (numdigits, numdigits)
             bar = barstr % (iter_length * mult, iter_length * mult)
             prog = float(iter_length) / iter_length
