@@ -134,7 +134,7 @@ def progressbar(target,
         sys.stdout.write("\b" * prev_total_width)
         sys.stdout.write("\r")
 
-        numdigits = int(cp.floor(cp.log10(iter_length))) + 1
+        numdigits = int(np.floor(np.log10(iter_length))) + 1
         barstr = '%%%dd/%%%dd [' % (numdigits, numdigits)
         bar = barstr % (current * mult, iter_length * mult)
         prog = float(current) / iter_length
@@ -183,7 +183,7 @@ def progressbar(target,
             sys.stdout.write("\b" * prev_total_width)
             sys.stdout.write("\r")
 
-            numdigits = int(cp.floor(cp.log10(iter_length))) + 1
+            numdigits = int(np.floor(np.log10(iter_length))) + 1
             barstr = '%%%dd/%%%dd [' % (numdigits, numdigits)
             bar = barstr % (iter_length * mult, iter_length * mult)
             prog = float(iter_length) / iter_length
