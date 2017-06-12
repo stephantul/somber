@@ -64,7 +64,7 @@ class Som(object):
         self.nbfunc = nbfunc
 
         # Initialize the distance grid: only needs to be done once.
-        self.distance_grid = self._initialize_distance_grid()
+        self.distance_grid = None
         self.min_max = min_max
         self.trained = False
 
@@ -139,6 +139,7 @@ class Som(object):
 
         X = self._create_batches(X, batch_size)
         self._ensure_params(X)
+        self.distance_grid = self._initialize_distance_grid(X)
 
         # The step size is the number of items between epochs.
         step_size_lr = max((train_length * stop_lr_updates) // total_updates, 1)
@@ -435,14 +436,15 @@ class Som(object):
         neighborhood = xp.exp(-self.distance_grid / (2.0 * sigma ** 2))
         return neighborhood.reshape(self.weight_dim, self.weight_dim)[:, :, None]
 
-    def _initialize_distance_grid(self):
+    def _initialize_distance_grid(self, X):
         """
         Initialize the distance grid by calls to _grid_dist.
 
         :return:
         """
+        xp = cp.get_array_module(X)
         p = [self._grid_distance(i) for i in range(self.weight_dim)]
-        return np.array(p, dtype=np.float32)
+        return xp.array(p, dtype=xp.float32)
 
     def _grid_distance(self, index):
         """
