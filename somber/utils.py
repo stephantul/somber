@@ -1,6 +1,6 @@
 import time
 import sys
-import numpy as np
+import cupy as np
 
 from functools import partial
 
