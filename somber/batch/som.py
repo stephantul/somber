@@ -122,7 +122,6 @@ class Som(object):
             raise ValueError("Your data size != weight dim: {0}, expected {1}".format(X.shape[1], self.data_dim))
 
         xp.random.seed(seed)
-        self.sigma = xp.float32(self.sigma)
 
         if init_pca:
             min_ = X.min(axis=0)
@@ -635,6 +634,8 @@ class Som(object):
         Loads a SOM from a JSON file.
 
         :param path: The path to the JSON file.
+        :param array_type: The array type to use.
+        Defaults to np, can be eiter numpy or cupy
         :return: A SOM.
         """
         xp = cp.get_array_module()
