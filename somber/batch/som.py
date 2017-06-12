@@ -592,10 +592,10 @@ class Som(object):
             raise ValueError("X and identities are not the same length: {0} and {1}".format(len(X), len(identities)))
 
         # Remove all duplicates from X
-        X_unique, names = list(), set()
+        X_unique, names = list(), list()
         for idx, name in enumerate(identities):
-            if name not in names:
-                names.add(name)
+            if name not in set(names):
+                names.append(name)
                 X_unique.append(idx)
 
         X_unique = X[X_unique]
