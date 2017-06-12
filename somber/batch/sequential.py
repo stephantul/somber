@@ -1,10 +1,23 @@
 import logging
 import json
+<<<<<<< HEAD
 import cupy as np
+=======
+
+from ..flags import Flags
+f = Flags()
+try:
+    if f['gpu']:
+        import cupy as np
+        np.cuda.Device(f['gpu']).use()
+    else:
+        import numpy as np
+except ImportError:
+    import numpy as np
+>>>>>>> master
 
 from .som import Som
-from ..utils import expo, linear, np_min, np_max
-from functools import reduce
+from ..utils import expo, linear, np_min, np_max, resize
 
 logger = logging.getLogger(__name__)
 
@@ -13,7 +26,7 @@ class Sequential(Som):
     """
     A base class for sequential SOMs, removing some code duplication.
 
-    Not usable as a stand-alone class
+    Not usable stand-alone.
     """
 
     def __init__(self,
@@ -23,8 +36,7 @@ class Sequential(Som):
                  sigma,
                  lrfunc=expo,
                  nbfunc=expo,
-                 min_max=np_min,
-                 influence_size=None):
+                 min_max=np_min):
         """
         A base class for sequential SOMs, removing some code duplication.
 
@@ -35,11 +47,6 @@ class Sequential(Som):
         :param lrfunc: The function used to decrease the learning rate.
         :param nbfunc: The function used to decrease the neighborhood
         :param min_max: The function used to determine the winner.
-        :param distance_function: The function used to do distance calculation.
-        Euclidean by default.
-        :param influence_size: The size of the influence matrix.
-        Usually reverts to data_dim, but can be
-        larger.
         """
         super().__init__(map_dim,
                          data_dim,
@@ -47,8 +54,7 @@ class Sequential(Som):
                          sigma,
                          lrfunc,
                          nbfunc,
-                         min_max,
-                         influence_size=influence_size)
+                         min_max)
 
     def _init_prev(self, X):
         """
@@ -73,22 +79,15 @@ class Sequential(Som):
         :param batch_size: The desired batch size.
         :return: A batched version of your data and a normed version of these batches.
         """
-
         self.progressbar_interval = 1
         self.progressbar_mult = batch_size
 
-        self.w_norm = np.ones((1, self.weights.shape[0]))
-        self.m_norm = np.ones((batch_size, 1))
-
-        print(self.w_norm.shape, self.m_norm.shape)
+        if batch_size > X.shape[0]:
+            batch_size = X.shape[0]
 
         max_x = int(np.ceil(X.shape[0] / batch_size))
         # This line first resizes the data to
-        # (batch_size, len(X) / batch_size, data_dim)
-        if X.shape[0] % batch_size == 0:
-            X = np.reshape(X, (batch_size, X.shape[0] // batch_size, X.shape[1]))
-        else:
-            X = np.resize(X, (batch_size, max_x, X.shape[1]))
+        X = resize(X, (batch_size, max_x, self.data_dim))
         # Transposes it to (len(X) / batch_size, batch_size, data_dim)
         return X.transpose((1, 0, 2))
 
@@ -96,7 +95,7 @@ class Sequential(Som):
 
         pass
 
-    def _predict_base(self, X):
+    def _predict_base(self, X, batch_size=100):
         """
         Predict distances to some input data.
 
@@ -104,18 +103,19 @@ class Sequential(Som):
         :return: An array of arrays, representing the activation
         each node has to each input.
         """
-        X = self._create_batches(X, len(X))
-        X = np.asarray(X, dtype=np.float32)
+        batched = self._create_batches(X, batch_size)
 
-        distances = []
+        activations = []
 
-        prev = self._init_prev(X)
+        activation = self._init_prev(batched)
 
-        for x in X:
-            prev = self.forward(x, prev_activation=prev)[0]
-            distances.extend(prev)
+        for x in batched:
+            activation = self.forward(x, prev_activation=activation)[0]
+            activations.append(activation)
 
-        return np.array(distances, dtype=np.float32)
+        activations = np.asarray(activations, dtype=np.float32).transpose((1, 0, 2))
+        activations = activations[:X.shape[0]]
+        return activations.reshape(X.shape[0], self.weight_dim)
 
 
 class Recursive(Sequential):
@@ -155,7 +155,6 @@ class Recursive(Sequential):
         decreased over time. If sigma is None (default), sigma is calculated as
         ((max(map_dim) / 2) + 0.01), which is generally a good value.
         """
-        influence_size = reduce(np.multiply, map_dim)
 
         super().__init__(map_dim,
                          data_dim,
@@ -163,14 +162,13 @@ class Recursive(Sequential):
                          lrfunc,
                          nbfunc,
                          sigma,
-                         min_max=np_max,
-                         influence_size=influence_size)
+                         min_max=np_max)
 
         self.context_weights = np.zeros((self.weight_dim, self.weight_dim), dtype=np.float32)
         self.alpha = alpha
         self.beta = beta
 
-    def _example(self, x, influences, **kwargs):
+    def _propagate(self, x, influences, **kwargs):
         """
         A single example.
 
@@ -186,26 +184,7 @@ class Recursive(Sequential):
 
         activation, diff_x, diff_y = self.forward(x, prev_activation=prev)
         self.backward(diff_x, influences, activation, difference_y=diff_y)
-
         return activation
-
-    def backward(self, diff_x, influences, activation, **kwargs):
-        """
-        Backward pass through the network, including update.
-
-        :param diff_x: The difference between the input data and the weights
-        :param influences: The influences at the current time-step
-        :param activation: The activation at the output
-        :param kwargs:
-        :return: None
-        """
-
-        diff_y = kwargs['difference_y']
-        influence = self._apply_influences(activation, influences)
-        # Update
-        self.weights += np.mean(self._calculate_update(diff_x, influence[:, :, :self.data_dim]), 0)
-        res = np.squeeze(np.mean(self._calculate_update(diff_y, influence), 0))
-        self.context_weights += res
 
     def forward(self, x, **kwargs):
         """
@@ -230,9 +209,30 @@ class Recursive(Sequential):
         distance_x, diff_x = self.distance_function(x, self.weights)
         distance_y, diff_y = self.distance_function(prev, self.context_weights)
 
-        activation = np.exp(-(np.multiply(distance_x, self.alpha) + np.multiply(distance_y, self.beta)))
+        x_ = np.multiply(distance_x, self.alpha)
+        y_ = np.multiply(distance_y, self.beta)
+        activation = np.exp(-(x_ + y_))
 
         return activation, diff_x, diff_y
+
+    def backward(self, diff_x, influences, activation, **kwargs):
+        """
+        Backward pass through the network, including update.
+
+        :param diff_x: The difference between the input data and the weights
+        :param influences: The influences at the current time-step
+        :param activation: The activation at the output
+        :param kwargs:
+        :return: None
+        """
+
+        diff_y = kwargs['difference_y']
+        influence = self._apply_influences(activation, influences)
+        # Update
+        x_update = self._calculate_update(diff_x, influence)
+        self.weights += x_update.mean(0)
+        y_update = self._calculate_update(diff_y, influence)
+        self.context_weights += np.squeeze(y_update.mean(0))
 
     @classmethod
     def load(cls, path):
@@ -352,7 +352,7 @@ class Merging(Sequential):
         self.context_weights = np.ones_like(self.weights)
         self.entropy = 0
 
-    def _example(self, x, influences, **kwargs):
+    def _propagate(self, x, influences, **kwargs):
         """
         A single example.
 
@@ -368,22 +368,6 @@ class Merging(Sequential):
         self.backward(diff_x, influences, activation, difference_y=diff_y)
 
         return activation
-
-    def backward(self, diff_x, influences, activation, **kwargs):
-        """
-        Backward pass through the network, including update.
-
-        :param diff_x: The difference between the input data and the weights
-        :param influences: The influences at the current time-step
-        :param activation: The activation at the output
-        :param kwargs:
-        :return: None
-        """
-
-        diff_y = kwargs['difference_y']
-        influence = self._apply_influences(activation, influences)
-        self.weights += np.mean(self._calculate_update(diff_x, influence), 0)
-        self.context_weights += np.mean(self._calculate_update(diff_y, influence), 0)
 
     def _entropy(self, prev_bmus, prev_update):
         """
@@ -441,16 +425,31 @@ class Merging(Sequential):
 
         return activations, diff_x, diff_y
 
-    def _predict_base(self, X):
+    def backward(self, diff_x, influences, activation, **kwargs):
+        """
+        Backward pass through the network, including update.
+
+        :param diff_x: The difference between the input data and the weights
+        :param influences: The influences at the current time-step
+        :param activation: The activation at the output
+        :param kwargs:
+        :return: None
+        """
+
+        diff_y = kwargs['difference_y']
+        influence = self._apply_influences(activation, influences)
+        self.weights += np.mean(self._calculate_update(diff_x, influence), 0)
+        self.context_weights += np.mean(self._calculate_update(diff_y, influence), 0)
+
+    def _predict_base(self, X, batch_size=1):
         """
         Predict distances to some input data.
 
         :param X: The input data.
-        :return: An array of arrays, representing the activation
+        :return: A matrix, representing the activation
         each node has to each input.
         """
-
-        X = self._create_batches(X, len(X))
+        X = self._create_batches(X, batch_size=batch_size)
         distances = []
 
         prev_activation = self._init_prev(X)
