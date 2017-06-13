@@ -506,7 +506,7 @@ class Som(object):
         else:
             return res.get()
 
-    def quant_error(self, X):
+    def quant_error(self, X, batch_size=1):
         """
         Calculate the quantization error.
 
@@ -514,10 +514,12 @@ class Som(object):
         some input.
 
         :param X: Input data.
+        :param batch_size: The batch size to use when calculating
+        the quantization error. Recommended to not raise this.
         :return: A vector of numbers, representing the quantization error
         for each data point.
         """
-        dist = self._predict_base(X)
+        dist = self._predict_base(X, batch_size)
         res = self.min_max(dist, 1)[0]
         xp = cp.get_array_module(res)
         if xp == np:
