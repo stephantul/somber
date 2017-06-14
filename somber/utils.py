@@ -3,21 +3,37 @@ import sys
 import cupy as cp
 import numpy as np
 
-from functools import partial
-
 
 def np_min(X, axis=None):
+    """
+    Calculate the min and argmin.
 
+    If no axis is given, this function just returns the min and argmin of X.
+    Otherwise, it will return the min and argmin over the specified axis.
+
+    :param X: the input data.
+    :param axis: the axis over which to compute the function.
+    :return The min and argmin of X
+    """
     xp = cp.get_array_module(X)
 
     if axis is None:
-        return xp.min(X)
+        return xp.min(X), xp.argmin(X)
     else:
         return xp.min(X, axis), xp.argmin(X, axis)
 
 
 def np_max(X, axis=None):
+    """
+    Calculate the max and argmax.
 
+    If no axis is given, this function just returns the max and argmax of X.
+    Otherwise, it will return the max and argmax over the specified axis.
+
+    :param X: the input data.
+    :param axis: the axis over which to compute the function.
+    :return The max and argmax of X
+    """
     xp = cp.get_array_module(X)
 
     if axis is None:
@@ -28,6 +44,8 @@ def np_max(X, axis=None):
 
 def resize(X, new_shape):
     """
+    Resizes your numpy arrays.
+
     Dummy resize function because cupy currently does
     not support direct resizing of arrays.
 
@@ -64,7 +82,7 @@ def expo(value, current_step, total_steps):
 
 def static(value, current_step, total_steps):
     """
-    Static function: nothing changes.
+    Identity function.
 
     :param value: the value
     :return:

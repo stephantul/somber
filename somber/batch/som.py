@@ -125,7 +125,7 @@ class Som(object):
 
         if init_pca:
             min_ = X.min(axis=0)
-            random = xp.random.rand(self.weight_dim).reshape((self.weight_dim, 1))
+            random = xp.random.rand(self.weight_dim)[:, None]
             temp = xp.outer(random, cp.abs(cp.max(X, axis=0) - min_))
             self.weights = xp.asarray(min_ + temp, dtype=xp.float32)
         else:
@@ -134,24 +134,24 @@ class Som(object):
         # The train length
         if batch_size > len(X):
             batch_size = len(X)
-        train_length = (len(X) * num_epochs) // batch_size
+        train_len = (len(X) * num_epochs) // batch_size
 
         X = self._create_batches(X, batch_size)
         self._ensure_params(X)
         self.distance_grid = self._initialize_distance_grid(X)
 
         # The step size is the number of items between epochs.
-        step_size_lr = max((train_length * stop_lr_updates) // total_updates, 1)
-        step_size_nb = max((train_length * stop_nb_updates) // total_updates, 1)
+        step_size_lr = max((train_len * stop_lr_updates) // total_updates, 1)
+        step_size_nb = max((train_len * stop_nb_updates) // total_updates, 1)
 
         # Precalculate the number of updates.
         # Precalculate the number of updates.
         lr_update_counter = set(xp.arange(step_size_lr,
-                                          (train_length * stop_lr_updates) + step_size_lr,
+                                          (train_len * stop_lr_updates) + step_size_lr,
                                           step_size_lr).tolist())
 
         nb_update_counter = set(xp.arange(step_size_nb,
-                                          (train_length * stop_nb_updates) + step_size_nb,
+                                          (train_len * stop_nb_updates) + step_size_nb,
                                           step_size_nb).tolist())
 
         start = time.time()
@@ -190,8 +190,7 @@ class Som(object):
 
     def _ensure_params(self, X):
         """
-        Function to ensure the params, i.e. the weights, are
-        of the correct type.
+        Ensure the params are of the correct type.
 
         :param X: The input data
         :return: None
@@ -199,11 +198,11 @@ class Som(object):
         xp = cp.get_array_module(X)
         self.weights = xp.asarray(self.weights, xp.float32)
 
-    def _init_prev(self, X):
+    def _init_prev(self, x):
         """
-        Placeholder
+        Placeholder.
 
-        :param X:
+        :param x:
         :return:
         """
         return None
@@ -218,7 +217,7 @@ class Som(object):
                show_progressbar,
                influences):
         """
-        A single epoch.
+        Run a single epoch.
 
         This function uses an index parameter which is passed around to see to
         how many training items the SOM has been exposed globally.
@@ -317,10 +316,13 @@ class Som(object):
 
     def _propagate(self, x, influences, **kwargs):
         """
-        Propagate a single example through the network, and update the
-        weights based on the response and map parameters.
+        Propagate a single example through the network.
 
-        :param X: a numpy array of data
+        First computes the activation the maps neurons, given a batch.
+        Then updates the weights of the neurons by taking the mean of
+        differences over the batch.
+
+        :param X: an array of data
         :param influences: The influence at the current epoch,
         given the learning rate and map size
         :return: A vector describing activation values for each unit.
@@ -332,7 +334,7 @@ class Som(object):
 
     def forward(self, x, **kwargs):
         """
-        Gets the best matching units, based on euclidean distance.
+        Get the best matching units, based on euclidean distance.
 
         :param x: The input vector
         :return: The activations, and
@@ -377,7 +379,7 @@ class Som(object):
 
     def distance_function(self, x, weights):
         """
-        batched version of the euclidean distance.
+        Calculate euclidean distance between a batch of input data and weights.
 
         :param x: The input
         :param weights: The weights
@@ -432,8 +434,8 @@ class Som(object):
         :return: The neighborhood
         """
         xp = cp.get_array_module(self.distance_grid)
-        neighborhood = xp.exp(-self.distance_grid / (2.0 * sigma ** 2))
-        return neighborhood.reshape(self.weight_dim, self.weight_dim)[:, :, None]
+        grid = xp.exp(-self.distance_grid / (2.0 * sigma ** 2))
+        return grid.reshape(self.weight_dim, self.weight_dim)[:, :, None]
 
     def _initialize_distance_grid(self, X):
         """
@@ -527,7 +529,12 @@ class Som(object):
         else:
             return res.get()
 
-    def receptive_field(self, X, identities, max_len=10, threshold=0.9, batch_size=1):
+    def receptive_field(self,
+                        X,
+                        identities,
+                        max_len=10,
+                        threshold=0.9,
+                        batch_size=1):
         """
         Calculate the receptive field of the SOM on some data.
 
@@ -541,9 +548,9 @@ class Som(object):
         :param max_len: The maximum length sequence we expect.
         Increasing the window size leads to accurate results,
         but costs more memory.
-        :param threshold: The threshold at which we consider a receptive field as being valid.
-        If at least this proportion of the sequences of a neuron have the same suffix, that suffix
-        is counted as acquired.
+        :param threshold: The threshold at which we consider a receptive field
+        valid. If at least this proportion of the sequences of a neuron have
+        the same suffix, that suffix is counted as acquired by the SOM.
         :param batch_size: The batch size to use in prediction
         :return: The receptive field of each neuron.
         """
@@ -633,7 +640,7 @@ class Som(object):
     @classmethod
     def load(cls, path, array_type=np):
         """
-        Loads a SOM from a JSON file.
+        Load a SOM from a JSON file.
 
         :param path: The path to the JSON file.
         :param array_type: The array type to use.
@@ -652,7 +659,12 @@ class Som(object):
         lr = data['lr']
         sigma = data['sigma']
 
-        s = cls(dimensions, datadim, lr, lrfunc=lrfunc, nbfunc=nbfunc, sigma=sigma)
+        s = cls(dimensions,
+                datadim,
+                lr,
+                lrfunc=lrfunc,
+                nbfunc=nbfunc,
+                sigma=sigma)
         s.weights = weights
         s.trained = True
 
@@ -660,12 +672,11 @@ class Som(object):
 
     def save(self, path):
         """
-        Saves a SOM to a JSON file.
+        Save a SOM to a JSON file.
 
         :param path: The path to the JSON file that will be created
         :return: None
         """
-
         to_save = {}
         to_save['weights'] = [[float(w) for w in x] for x in self.weights]
         to_save['dimensions'] = self.map_dimensions

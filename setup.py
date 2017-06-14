@@ -6,7 +6,7 @@ from setuptools import find_packages
 
 
 setup(name='somber',
-      version='0.3.3',
+      version='1.0.0',
       description='Self-Organizing Maps in Numpy',
       author='Stéphan Tulkens',
       author_email='stephan.tulkens@uantwerpen.be',
@@ -16,7 +16,7 @@ setup(name='somber',
       install_requires=['numpy>=1.11.0'],
       classifiers=[
           'Intended Audience :: Developers',
-          'Programming Language :: Python :: 2',
+
           'Programming Language :: Python :: 3',],
       keywords='self-organizing maps machine learning unsupervised',
       zip_safe=True)

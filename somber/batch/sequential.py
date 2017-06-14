@@ -45,8 +45,7 @@ class Sequential(Som):
 
     def _ensure_params(self, X):
         """
-        Ensure the parameters, i.e. the weights,
-        are of the correct type
+        Ensures the parameters are of the correct type.
 
         :param X: The input data
         :return: None
@@ -57,7 +56,7 @@ class Sequential(Som):
 
     def _init_prev(self, X):
         """
-        A safe initialization for the first previous value.
+        Safely initializes the first previous activation.
 
         :param X: The input data.
         :return: A matrix of the appropriate size for simulating contexts.
@@ -77,7 +76,7 @@ class Sequential(Som):
         :param X: A numpy array, representing your input data.
         Must have 2 dimensions.
         :param batch_size: The desired batch size.
-        :return: A batched version of your data and a normed version of these batches.
+        :return: A batched version of your data
         """
         xp = cp.get_array_module(X)
 
@@ -94,7 +93,12 @@ class Sequential(Som):
         return X.transpose((1, 0, 2))
 
     def forward(self, x, **kwargs):
+        """
+        Empty.
 
+        :param x: the input data
+        :return None
+        """
         pass
 
     def _predict_base(self, X, batch_size=100):
@@ -116,13 +120,13 @@ class Sequential(Som):
             activation = self.forward(x, prev_activation=activation)[0]
             activations.append(activation)
 
-        activations = xp.asarray(activations, dtype=xp.float32).transpose((1, 0, 2))
-        activations = activations[:X.shape[0]]
-        return activations.reshape(X.shape[0], self.weight_dim)
+        act = xp.asarray(activations, dtype=xp.float32).transpose((1, 0, 2))
+        act = act[:X.shape[0]]
+        return act.reshape(X.shape[0], self.weight_dim)
 
     def generate(self, num_to_generate, starting_place):
         """
-        Generates based on some initial position.
+        Generate data based on some initial position.
 
         :param num_to_generate: The number of tokens to generate
         :param starting_place: The place to start from. This should
@@ -185,13 +189,14 @@ class Recursive(Sequential):
                          sigma,
                          min_max=np_max)
 
-        self.context_weights = np.zeros((self.weight_dim, self.weight_dim), dtype=np.float32)
+        self.context_weights = np.zeros((self.weight_dim, self.weight_dim),
+                                        dtype=np.float32)
         self.alpha = alpha
         self.beta = beta
 
     def _propagate(self, x, influences, **kwargs):
         """
-        A single example.
+        Process a single batch of examples.
 
         :param x: a numpy array of data
         :param influences: The influence at the current epoch,
@@ -200,7 +205,6 @@ class Recursive(Sequential):
         timestep.
         :return: A vector describing activation values for each unit.
         """
-
         prev = kwargs['prev_activation']
 
         activation, diff_x, diff_y = self.forward(x, prev_activation=prev)
@@ -282,7 +286,8 @@ class Recursive(Sequential):
 
         try:
             context_weights = data['context_weights']
-            context_weights = array_type.asarray(context_weights, dtype=cp.float32)
+            context_weights = array_type.asarray(context_weights,
+                                                 dtype=cp.float32)
         except KeyError:
             context_weights = array_type.zeros((len(weights), len(weights)))
 
@@ -317,7 +322,8 @@ class Recursive(Sequential):
         """
         dicto = {}
         dicto['weights'] = [[float(w) for w in x] for x in self.weights]
-        dicto['context_weights'] = [[float(w) for w in x] for x in self.context_weights]
+        dicto['context_weights'] = [[float(w) for w in x] for
+                                    x in self.context_weights]
         dicto['dimensions'] = self.map_dimensions
         dicto['lrfunc'] = 'expo' if self.lrfunc == expo else 'linear'
         dicto['nbfunc'] = 'expo' if self.nbfunc == expo else 'linear'
@@ -398,7 +404,7 @@ class Merging(Sequential):
 
     def _propagate(self, x, influences, **kwargs):
         """
-        A single example.
+        Process a single batch of examples.
 
         :param X: a numpy array of data
         :param influences: The influence at the current epoch,
@@ -453,12 +459,12 @@ class Merging(Sequential):
         :param x: The input vector
         :return: An integer, representing the index of the best matching unit.
         """
-        xp = cp.get_array_module()
-        # Differences is the components of the weights
-        # subtracted from the weight vector.
-
         prev_bmu = self.min_max(kwargs['prev_activation'], 1)[1]
-        context = (1 - self.beta) * self.weights[prev_bmu] + self.beta * self.context_weights[prev_bmu]
+
+        # weight part of context.
+        context = (1 - self.beta) * self.weights[prev_bmu]
+        # previous part of context.
+        context += self.beta * self.context_weights[prev_bmu]
 
         distances_x, diff_x = self.distance_function(x,
                                                      self.weights)
@@ -468,9 +474,9 @@ class Merging(Sequential):
 
         # BMU is based on a weighted addition of current and
         # previous activation.
-        activations = (distances_x * 1 - self.alpha) + (distances_y * self.alpha)
+        act = (distances_x * 1 - self.alpha) + (distances_y * self.alpha)
 
-        return activations, diff_x, diff_y
+        return act, diff_x, diff_y
 
     def backward(self, diff_x, influences, activation, **kwargs):
         """
@@ -482,11 +488,15 @@ class Merging(Sequential):
         :param kwargs:
         :return: None
         """
-
         diff_y = kwargs['difference_y']
         influence = self._apply_influences(activation, influences)
-        self.weights += self._calculate_update(diff_x, influence).mean(0)
-        self.context_weights += self._calculate_update(diff_y, influence).mean(0)
+        # Calculate updates
+        update = self._calculate_update(diff_x, influence)
+        context_update = self._calculate_update(diff_y, influence)
+
+        # Assign updates
+        self.weights += update.mean(0)
+        self.context_weights += context_update.mean(0)
 
     def _predict_base(self, X, batch_size=1):
         """
@@ -500,17 +510,17 @@ class Merging(Sequential):
         X = self._create_batches(X, batch_size=batch_size)
         distances = []
 
-        prev_activation = self._init_prev(X)
+        prev = self._init_prev(X)
 
         for x in X:
-            prev_activation = self.forward(x, prev_activation=prev_activation)[0]
-            distances.extend(prev_activation)
+            prev = self.forward(x, prev_activation=prev)[0]
+            distances.extend(prev)
 
         return xp.array(distances, dtype=xp.float32)
 
     def generate(self, num_to_generate, starting_place):
         """
-        Generates based on some initial position.
+        Generate data based on some initial position.
 
         :param num_to_generate: The number of tokens to generate
         :param starting_place: The place to start from. This should
@@ -518,7 +528,12 @@ class Merging(Sequential):
         :return:
         """
         res = []
-        activ = self.weights[np.argmin(self.distance_function(starting_place[None, :], self.weights)[0])]
+
+        # Calculate the first BMU.
+        start_idx = np.argmin(self.distance_function(starting_place[None, :],
+                              self.weights)[0])
+
+        activ = self.weights[start_idx]
         for x in range(num_to_generate):
             p, _ = self.distance_function(activ[None, :], self.context_weights)
             p = np.argmin(p)
@@ -530,7 +545,7 @@ class Merging(Sequential):
     @classmethod
     def load(cls, path, array_type=np):
         """
-        Loads a SOM from a JSON file.
+        Load a SOM from a JSON file.
 
         A normal SOM can be loaded via this method. Any attributes not present
         in the loaded JSON will be initialized to sane values.
@@ -539,11 +554,10 @@ class Merging(Sequential):
         :param array_type: The array type to use.
         :return: A trained mergeSom.
         """
-
         data = json.load(open(path))
 
         weights = data['weights']
-        weights = array_type.array(weights, dtype=cp.float32)
+        weights = array_type.array(weights, dtype=array_type.float32)
 
         datadim = weights.shape[1]
         dimensions = data['dimensions']
@@ -555,7 +569,8 @@ class Merging(Sequential):
 
         try:
             context_weights = data['context_weights']
-            context_weights = array_type.array(context_weights, dtype=cp.float32)
+            context_weights = array_type.array(context_weights,
+                                               dtype=array_type.float32)
         except KeyError:
             context_weights = array_type.ones(weights.shape)
 
@@ -568,7 +583,15 @@ class Merging(Sequential):
             beta = 0.5
             entropy = 0.0
 
-        s = cls(dimensions, datadim, lr, lrfunc=lrfunc, nbfunc=nbfunc, sigma=sigma, alpha=alpha, beta=beta)
+        s = cls(dimensions,
+                datadim,
+                lr,
+                lrfunc=lrfunc,
+                nbfunc=nbfunc,
+                sigma=sigma,
+                alpha=alpha,
+                beta=beta)
+
         s.entropy = entropy
         s.weights = weights
         s.context_weights = context_weights
@@ -578,15 +601,15 @@ class Merging(Sequential):
 
     def save(self, path):
         """
-        Saves the merging SOM to a JSON file.
+        Save the merging SOM to a JSON file.
 
         :param path: The path to which to save the JSON file.
         :return: None
         """
-
         to_save = {}
         to_save['weights'] = [[float(w) for w in x] for x in self.weights]
-        to_save['context_weights'] = [[float(w) for w in x] for x in self.context_weights]
+        to_save['context_weights'] = [[float(w) for w in x]
+                                      for x in self.context_weights]
         to_save['dimensions'] = self.map_dimensions
         to_save['lrfunc'] = 'expo' if self.lrfunc == expo else 'linear'
         to_save['nbfunc'] = 'expo' if self.nbfunc == expo else 'linear'
