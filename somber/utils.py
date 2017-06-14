@@ -1,29 +1,29 @@
 import time
 import sys
-
-from .flags import Flags
-f = Flags()
-try:
-    if f['gpu']:
-        import cupy as np
-        np.cuda.Device(f['gpu']).use()
-    else:
-        import numpy as np
-except ImportError:
-    import numpy as np
+import cupy as cp
+import numpy as np
 
 from functools import partial
 
 
-def np_minmax(func1, func2, X, axis=None):
+def np_min(X, axis=None):
+
+    xp = cp.get_array_module(X)
 
     if axis is None:
-        return func1(X)
+        return xp.min(X)
     else:
-        return func1(X, axis), func2(X, axis)
+        return xp.min(X, axis), xp.argmin(X, axis)
 
-np_min = partial(np_minmax, np.min, np.argmin)
-np_max = partial(np_minmax, np.max, np.argmax)
+
+def np_max(X, axis=None):
+
+    xp = cp.get_array_module(X)
+
+    if axis is None:
+        return xp.max(X)
+    else:
+        return xp.max(X, axis), xp.argmax(X, axis)
 
 
 def resize(X, new_shape):
@@ -36,12 +36,13 @@ def resize(X, new_shape):
     Must have the same dimensions as X.
     :return: A resized array.
     """
+    xp = cp.get_array_module(X)
 
     # Difference between actual and desired size
     length_diff = (new_shape[0] * new_shape[1]) - len(X)
-
+    z = xp.zeros((length_diff, X.shape[1]))
     # Pad input data with zeros
-    z = np.concatenate([X, np.zeros((length_diff, X.shape[1]))])
+    z = xp.concatenate([X, z])
 
     # Reshape
     return z.reshape(new_shape)
@@ -58,7 +59,7 @@ def expo(value, current_step, total_steps):
     :param total_steps: The maximum number of steps.
     :return:
     """
-    return value * np.exp(-2.5 * (current_step / total_steps))
+    return np.float32(value * np.exp(-2.5 * (current_step / total_steps)))
 
 
 def static(value, current_step, total_steps):
