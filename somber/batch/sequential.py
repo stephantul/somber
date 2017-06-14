@@ -120,6 +120,24 @@ class Sequential(Som):
         activations = activations[:X.shape[0]]
         return activations.reshape(X.shape[0], self.weight_dim)
 
+    def generate(self, num_to_generate, starting_place):
+        """
+        Generates based on some initial position.
+
+        :param num_to_generate: The number of tokens to generate
+        :param starting_place: The place to start from. This should
+        be a vector equal to a context weight.
+        :return:
+        """
+        res = []
+        activ = starting_place
+        for x in range(num_to_generate):
+            m = np.argmax(activ, 0)
+            res.append(m)
+            activ = self.context_weights[m]
+
+        return res[::-1]
+
 
 class Recursive(Sequential):
 
@@ -310,6 +328,27 @@ class Recursive(Sequential):
 
         json.dump(dicto, open(path, 'w'))
 
+    def quant_error(self, X, batch_size=1):
+        """
+        Calculate the quantization error.
+
+        Find the the minimum euclidean distance between the units and
+        some input.
+
+        :param X: Input data.
+        :param batch_size: The batch size to use when calculating
+        the quantization error. Recommended to not raise this.
+        :return: A vector of numbers, representing the quantization error
+        for each data point.
+        """
+        dist = self._predict_base(X, batch_size)
+        res = 1 - self.min_max(dist, 1)[0]
+        xp = cp.get_array_module(res)
+        if xp == np:
+            return res
+        else:
+            return res.get()
+
 
 class Merging(Sequential):
 
@@ -464,11 +503,29 @@ class Merging(Sequential):
         prev_activation = self._init_prev(X)
 
         for x in X:
-            prev_activation = self.weights[self.min_max(prev_activation, 1)[1]]
             prev_activation = self.forward(x, prev_activation=prev_activation)[0]
             distances.extend(prev_activation)
 
         return xp.array(distances, dtype=xp.float32)
+
+    def generate(self, num_to_generate, starting_place):
+        """
+        Generates based on some initial position.
+
+        :param num_to_generate: The number of tokens to generate
+        :param starting_place: The place to start from. This should
+        be a vector equal to a context weight.
+        :return:
+        """
+        res = []
+        activ = self.weights[np.argmin(self.distance_function(starting_place[None, :], self.weights)[0])]
+        for x in range(num_to_generate):
+            p, _ = self.distance_function(activ[None, :], self.context_weights)
+            p = np.argmin(p)
+            res.append(p)
+            activ = self.weights[p]
+
+        return res
 
     @classmethod
     def load(cls, path, array_type=np):
