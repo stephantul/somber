@@ -640,12 +640,10 @@ class Som(object):
         Defaults to np, can be eiter numpy or cupy
         :return: A SOM.
         """
-        xp = cp.get_array_module()
-
         data = json.load(open(path))
 
         weights = data['weights']
-        weights = xp.asarray(weights, dtype=xp.float32)
+        weights = array_type.asarray(weights, dtype=array_type.float32)
         datadim = weights.shape[1]
 
         dimensions = data['dimensions']
