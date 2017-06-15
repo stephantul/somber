@@ -36,7 +36,7 @@ The color dataset comes from this nice `blog, <https://codesachin.wordpress.com/
 
 .. code-block:: python
 
-  import cupy as cp
+  import numpy as np
 
   from somber.batch.som import Som
 
