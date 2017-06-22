@@ -4,7 +4,7 @@ import cupy as cp
 import numpy as np
 
 from .som import Som
-from ..utils import expo, linear, np_min, np_max, resize
+from .utils import expo, linear, np_min, np_max, resize
 
 logger = logging.getLogger(__name__)
 
@@ -45,7 +45,7 @@ class Sequential(Som):
 
     def _ensure_params(self, X):
         """
-        Ensures the parameters are of the correct type.
+        Ensure the parameters are of the correct type.
 
         :param X: The input data
         :return: None
@@ -88,7 +88,7 @@ class Sequential(Som):
 
         max_x = int(xp.ceil(X.shape[0] / batch_size))
         # This line first resizes the data to
-        X = resize(X, (batch_size, max_x, self.data_dim))
+        X = resize(X, (batch_size, max_x, X.shape[1]))
         # Transposes it to (len(X) / batch_size, batch_size, data_dim)
         return X.transpose((1, 0, 2))
 
@@ -109,6 +109,8 @@ class Sequential(Som):
         :return: An array of arrays, representing the activation
         each node has to each input.
         """
+        self._check_input(X)
+
         xp = cp.get_array_module(X)
         batched = self._create_batches(X, batch_size)
 
@@ -196,13 +198,15 @@ class Recursive(Sequential):
 
     def _propagate(self, x, influences, **kwargs):
         """
-        Process a single batch of examples.
+        Propagate a single batch of examples through the network.
 
-        :param x: a numpy array of data
+        First computes the activation the maps neurons, given a batch.
+        Then updates the weights of the neurons by taking the mean of
+        differences over the batch.
+
+        :param X: an array of data
         :param influences: The influence at the current epoch,
         given the learning rate and map size
-        :param prev_activation: The activation in the previous
-        timestep.
         :return: A vector describing activation values for each unit.
         """
         prev = kwargs['prev_activation']
@@ -506,6 +510,8 @@ class Merging(Sequential):
         :return: A matrix, representing the activation
         each node has to each input.
         """
+        self._check_input(X)
+
         xp = cp.get_array_module(X)
         X = self._create_batches(X, batch_size=batch_size)
         distances = []

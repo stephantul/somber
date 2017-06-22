@@ -5,7 +5,8 @@ import json
 import cupy as cp
 import numpy as np
 
-from ..utils import progressbar, linear, expo, np_min, resize
+from tqdm import tqdm
+from .utils import linear, expo, np_min, resize
 from functools import reduce
 from collections import Counter, defaultdict
 
@@ -13,9 +14,7 @@ logger = logging.getLogger(__name__)
 
 
 class Som(object):
-    """
-    This is the batched version of the basic SOM.
-    """
+    """This is a batched version of the basic SOM."""
 
     def __init__(self,
                  map_dim,
@@ -114,12 +113,7 @@ class Som(object):
         xp = cp.get_array_module(X)
 
         X = xp.asarray(X, dtype=xp.float32)
-
-        if X.ndim != 2:
-            raise ValueError("Your data is not a 2D matrix. Actual size: {0}".format(X.shape))
-
-        if X.shape[1] != self.data_dim:
-            raise ValueError("Your data size != weight dim: {0}, expected {1}".format(X.shape[1], self.data_dim))
+        self._check_input(X)
 
         xp.random.seed(seed)
 
@@ -144,15 +138,17 @@ class Som(object):
         step_size_lr = max((train_len * stop_lr_updates) // total_updates, 1)
         step_size_nb = max((train_len * stop_nb_updates) // total_updates, 1)
 
-        # Precalculate the number of updates.
-        # Precalculate the number of updates.
-        lr_update_counter = set(xp.arange(step_size_lr,
-                                          (train_len * stop_lr_updates) + step_size_lr,
-                                          step_size_lr).tolist())
+        # Precalculate the number of LR updates.
+        stop_lr = (train_len * stop_lr_updates)
+        lr_update_steps = set(xp.arange(step_size_lr,
+                                        stop_lr + step_size_lr,
+                                        step_size_lr).tolist())
 
-        nb_update_counter = set(xp.arange(step_size_nb,
-                                          (train_len * stop_nb_updates) + step_size_nb,
-                                          step_size_nb).tolist())
+        # Precalculate the number of LR updates.
+        stop_nb = (train_len * stop_nb_updates)
+        nb_update_steps = set(xp.arange(step_size_nb,
+                                        stop_nb + step_size_nb,
+                                        step_size_nb).tolist())
 
         start = time.time()
 
@@ -163,11 +159,11 @@ class Som(object):
 
         map_radius = self.nbfunc(self.sigma,
                                  0,
-                                 len(nb_update_counter))
+                                 len(nb_update_steps))
 
         learning_rate = self.lrfunc(self.learning_rate,
                                     0,
-                                    len(lr_update_counter))
+                                    len(lr_update_steps))
 
         influences = self._calculate_influence(map_radius) * learning_rate
 
@@ -176,8 +172,8 @@ class Som(object):
             logger.info("Epoch {0} of {1}".format(epoch, num_epochs))
 
             idx, nb_step, lr_step, influences = self._epoch(X,
-                                                            nb_update_counter,
-                                                            lr_update_counter,
+                                                            nb_update_steps,
+                                                            lr_update_steps,
                                                             idx,
                                                             nb_step,
                                                             lr_step,
@@ -190,7 +186,7 @@ class Som(object):
 
     def _ensure_params(self, X):
         """
-        Ensure the params are of the correct type.
+        Ensure the parameters are of the correct type.
 
         :param X: The input data
         :return: None
@@ -209,8 +205,8 @@ class Som(object):
 
     def _epoch(self,
                X,
-               nb_update_counter,
-               lr_update_counter,
+               nb_update_steps,
+               lr_update_steps,
                idx,
                nb_step,
                lr_step,
@@ -229,9 +225,9 @@ class Som(object):
         and learning rate parameters have been updated already.
 
         :param X: The training data.
-        :param nb_update_counter: The indices at which to
+        :param nb_update_steps: The indices at which to
         update the neighborhood.
-        :param lr_update_counter: The indices at which to
+        :param lr_update_steps: The indices at which to
         update the learning rate.
         :param idx: The current index.
         :param nb_step: The current neighborhood step.
@@ -245,25 +241,22 @@ class Som(object):
         # Calculate the influences for update 0.
         learning_rate = self.lrfunc(self.learning_rate,
                                     lr_step,
-                                    len(lr_update_counter))
+                                    len(lr_update_steps))
 
         # Iterate over the training data
-        for x in progressbar(X,
-                             use=show_progressbar,
-                             mult=self.progressbar_mult,
-                             idx_interval=self.progressbar_interval):
+        for x in tqdm(X, disable=not show_progressbar):
 
             prev_activation = self._propagate(x,
                                               influences,
                                               prev_activation=prev_activation)
 
-            if idx in nb_update_counter:
+            if idx in nb_update_steps:
 
                 nb_step += 1
 
                 map_radius = self.nbfunc(self.sigma,
                                          nb_step,
-                                         len(nb_update_counter))
+                                         len(nb_update_steps))
                 logger.info("Updated map radius: {0}".format(map_radius))
 
                 # The map radius has been updated, so the influence
@@ -271,14 +264,14 @@ class Som(object):
                 influences = self._calculate_influence(map_radius)
                 influences *= learning_rate
 
-            if idx in lr_update_counter:
+            if idx in lr_update_steps:
                 lr_step += 1
 
                 # Reset the influences back to 1
                 influences /= learning_rate
                 learning_rate = self.lrfunc(self.learning_rate,
                                             lr_step,
-                                            len(lr_update_counter))
+                                            len(lr_update_steps))
                 logger.info("Updated learning rate: {0}".format(learning_rate))
                 # Recalculate the influences
                 influences *= learning_rate
@@ -310,13 +303,13 @@ class Som(object):
             batch_size = X.shape[0]
 
         max_x = int(xp.ceil(X.shape[0] / batch_size))
-        X = resize(X, (max_x, batch_size, self.data_dim))
+        X = resize(X, (max_x, batch_size, X.shape[1]))
 
         return X
 
     def _propagate(self, x, influences, **kwargs):
         """
-        Propagate a single example through the network.
+        Propagate a single batch of examples through the network.
 
         First computes the activation the maps neurons, given a batch.
         Then updates the weights of the neurons by taking the mean of
@@ -363,18 +356,18 @@ class Som(object):
         xp = cp.get_array_module(x)
         return xp.multiply(x, influence)
 
-    def backward(self, x, influences, activation, **kwargs):
+    def backward(self, diff_x, influences, activation, **kwargs):
         """
         Backward pass through the network, including update.
 
-        :param x: The input data
+        :param diff_x: The difference between the input data and the weights
         :param influences: The influences at the current time-step
         :param activation: The activation at the output layer
         :param kwargs:
         :return: None
         """
         influence = self._apply_influences(activation, influences)
-        update = self._calculate_update(x, influence)
+        update = self._calculate_update(diff_x, influence)
         self.weights += update.mean(0)
 
     def distance_function(self, x, weights):
@@ -470,6 +463,23 @@ class Som(object):
 
         return distance
 
+    def _check_input(self, X):
+        """
+        Check the input for validity.
+
+        Ensures that the input data, X, is a 2-dimensional matrix, and that
+        the second dimension of this matrix has the same dimensionality as
+        the weight matrix.
+
+        :param X: the input data
+        :return: None
+        """
+        if X.ndim != 2:
+            raise ValueError("Your data is not a 2D matrix. Actual size: {0}".format(X.shape))
+
+        if X.shape[1] != self.data_dim:
+            raise ValueError("Your data size != weight dim: {0}, expected {1}".format(X.shape[1], self.data_dim))
+
     def _predict_base(self, X, batch_size=100):
         """
         Predict distances to some input data.
@@ -480,13 +490,15 @@ class Som(object):
         :return: A matrix, representing the activation
         each node has to each input.
         """
+        self._check_input(X)
+
         xp = cp.get_array_module()
         batched = self._create_batches(X, batch_size)
 
         activations = []
 
         for x in batched:
-            activations.append(self.forward(x)[0])
+            activations.extend(self.forward(x)[0])
 
         activations = xp.asarray(activations, dtype=xp.float32)
         activations = activations[:X.shape[0]]
