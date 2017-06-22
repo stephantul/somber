@@ -1,1 +1,5 @@
-numpy == 1.12.1
+tqdm==4.14.0
+cupy.egg==info
+numpy==1.12.1
+setuptools==36.0.1
+cupy==1.0.0.1
