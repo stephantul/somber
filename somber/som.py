@@ -480,7 +480,7 @@ class Som(object):
         if X.shape[1] != self.data_dim:
             raise ValueError("Your data size != weight dim: {0}, expected {1}".format(X.shape[1], self.data_dim))
 
-    def _predict_base(self, X, batch_size=100):
+    def _predict_base(self, X, batch_size=100, show_progressbar=False):
         """
         Predict distances to some input data.
 
@@ -497,14 +497,14 @@ class Som(object):
 
         activations = []
 
-        for x in batched:
+        for x in tqdm(batched):
             activations.extend(self.forward(x)[0])
 
         activations = xp.asarray(activations, dtype=xp.float32)
         activations = activations[:X.shape[0]]
         return activations.reshape(X.shape[0], self.weight_dim)
 
-    def predict(self, X, batch_size=100):
+    def predict(self, X, batch_size=100, show_progressbar=True):
         """
         Predict the BMU for each input data.
 
@@ -512,7 +512,7 @@ class Som(object):
         :param batch_size: The batch size to use in prediction.
         :return: The index of the bmu which best describes the input data.
         """
-        dist = self._predict_base(X, batch_size)
+        dist = self._predict_base(X, batch_size, show_progressbar)
         res = self.min_max(dist, 1)[1]
         xp = cp.get_array_module(res)
         if xp == np:
