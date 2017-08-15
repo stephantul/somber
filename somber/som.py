@@ -9,8 +9,85 @@ from tqdm import tqdm
 from .utils import linear, expo, np_min, resize
 from functools import reduce
 from collections import Counter, defaultdict
+from sklearn.decomposition import PCA
+from sklearn.preprocessing import StandardScaler
+
 
 logger = logging.getLogger(__name__)
+
+
+class Scaler(object):
+    """Simple scaler based on mean and stdev."""
+
+    def __init__(self):
+        """
+        Scales data based on the mean and standard deviation.
+
+        Reimplemented because this needs to deal with both numpy and cupy
+        arrays.
+        """
+        self.mean = 0
+        self.std = 0
+        self.is_fit = False
+
+    def fit_transform(self, X):
+        """
+        Fit and transform the scaler based on some data.
+
+        :param X: The input data as an array.
+        :return: A scaled version of said array.
+        """
+        self.fit(X)
+        return self.transform(X)
+
+    def fit(self, X):
+        """
+        Fit the scaler based on some data.
+
+        Gets the mean  and standard deviation of all feature values
+        and stores them.
+
+        :param X: The input data as an array.
+        """
+        self.mean = X.mean(0)
+        self.std = X.std(0)
+        self.is_fit = True
+
+    def transform(self, X):
+        """
+        Transform some data by rescaling it.
+
+        First subtracts the mean from the data, and then divides by the
+        standard deviation.
+
+        :param X: The input data as an array.
+        :return: A scaled version of the array.
+        """
+        return (X-self.mean) / (self.std + 10e-6)
+
+    def inverse_transform(self, X):
+        """
+        Revert the transform function.
+
+        :param X: The data to perform an inverse transform on.
+        :param return: The unscaled version of the data.
+        """
+        # Round to ensure that very small differences don't
+        # cause arrays to become inequal.
+        return ((X * self.std) + self.mean)
+
+
+def shuffle(array):
+    """Gpu/cpu-agnostic shuffle function."""
+    xp = cp.get_array_module(array)
+    z = array.copy()
+    if xp == cp:
+        z = z.get()
+        np.random.shuffle(z)
+        return cp.array(z, dtype=array.dtype)
+    else:
+        np.random.shuffle(z)
+        return z
 
 
 class Som(object):
@@ -66,9 +143,7 @@ class Som(object):
         self.distance_grid = None
         self.min_max = min_max
         self.trained = False
-
-        self.progressbar_interval = 10
-        self.progressbar_mult = 1
+        self.scaler = Scaler()
 
     def fit(self,
             X,
@@ -115,24 +190,50 @@ class Som(object):
         X = xp.asarray(X, dtype=xp.float32)
         self._check_input(X)
 
+        X = self.scaler.fit_transform(X)
+
         xp.random.seed(seed)
 
         if init_pca:
-            min_ = X.min(axis=0)
-            random = xp.random.rand(self.weight_dim)[:, None]
-            temp = xp.outer(random, cp.abs(cp.max(X, axis=0) - min_))
-            self.weights = xp.asarray(min_ + temp, dtype=xp.float32)
+
+            if xp == cp:
+                raise ValueError("PCA is currently not supported on GPU.")
+
+            x = xp.arange(len(self.weights)) // self.map_dimensions[1]
+            y = xp.arange(len(self.weights)) % self.map_dimensions[1]
+            coord = xp.stack([x, y], 1)
+
+            coord = coord / self.map_dimensions[1]
+            coord = (coord - .5) * 2
+
+            # Subtract mean from data.
+            mean = X.mean(0)
+            temp = X - mean
+            pca = PCA(n_components=2, svd_solver='randomized')
+            pca.fit(temp)
+            eigvec = pca.components_
+            eigval = pca.explained_variance_
+            norms = np.sqrt(np.sum(np.square(eigvec), 1))
+            eigvec = ((eigvec.T/norms)*eigval).T
+
+            p = coord[:, :, None] * eigvec[None, :, :]
+            self.weights = p.sum(1) + mean
+            self.weights = xp.array(self.weights)
         else:
-            self.weights = xp.zeros(self.weights.shape)
+            min_val = X.min(0)
+            max_val = X.max(0)
+            data_range = min_val + (max_val - min_val)
+            self.weights = data_range * xp.random.rand(len(self.weights),
+                                                       X.shape[1])
 
         # The train length
         if batch_size > len(X):
             batch_size = len(X)
         train_len = (len(X) * num_epochs) // batch_size
 
-        X = self._create_batches(X, batch_size)
-        self._ensure_params(X)
-        self.distance_grid = self._initialize_distance_grid(X)
+        batched = self._create_batches(X, batch_size)
+        self._ensure_params(batched)
+        self.distance_grid = self._initialize_distance_grid(batched)
 
         # The step size is the number of items between epochs.
         step_size_lr = max((train_len * stop_lr_updates) // total_updates, 1)
@@ -174,6 +275,7 @@ class Som(object):
             idx, nb_step, lr_step, influences = self._epoch(X,
                                                             nb_update_steps,
                                                             lr_update_steps,
+                                                            batch_size,
                                                             idx,
                                                             nb_step,
                                                             lr_step,
@@ -181,6 +283,7 @@ class Som(object):
                                                             influences)
 
         self.trained = True
+        self.weights = self.scaler.inverse_transform(self.weights)
 
         logger.info("Total train time: {0}".format(time.time() - start))
 
@@ -207,6 +310,7 @@ class Som(object):
                X,
                nb_update_steps,
                lr_update_steps,
+               batch_size,
                idx,
                nb_step,
                lr_step,
@@ -235,6 +339,13 @@ class Som(object):
         :param show_progressbar: Whether to show a progress bar or not.
         :return: The index, neighborhood step and learning rate step
         """
+        # Store original data length
+        data_len = X.shape[0]
+        num_processed = 0
+
+        # Shuffle and batch training data
+        X = self._create_batches(X, batch_size)
+
         # Initialize the previous activation
         prev_activation = self._init_prev(X)
 
@@ -245,6 +356,9 @@ class Som(object):
 
         # Iterate over the training data
         for x in tqdm(X, disable=not show_progressbar):
+
+            if num_processed + batch_size > data_len:
+                x = x[:data_len - (num_processed + batch_size)]
 
             prev_activation = self._propagate(x,
                                               influences,
@@ -276,11 +390,13 @@ class Som(object):
                 # Recalculate the influences
                 influences *= learning_rate
 
+            num_processed += batch_size
+
             idx += 1
 
         return idx, nb_step, lr_step, influences
 
-    def _create_batches(self, X, batch_size):
+    def _create_batches(self, X, batch_size, shuffle_data=True):
         """
         Create batches out of a sequence of data.
 
@@ -296,8 +412,8 @@ class Som(object):
         """
         xp = cp.get_array_module(X)
 
-        self.progressbar_interval = 1
-        self.progressbar_mult = batch_size
+        if shuffle_data:
+            X = shuffle(X)
 
         if batch_size > X.shape[0]:
             batch_size = X.shape[0]
@@ -349,7 +465,7 @@ class Som(object):
         In this case (X - w) has been precomputed for speed, in the
         forward step.
 
-        :param x: The input vector
+        :param x: The difference vector between the weights and the input.
         :param influence: The influence the result has on each unit,
         depending on distance. Already includes the learning rate.
         """
@@ -475,10 +591,12 @@ class Som(object):
         :return: None
         """
         if X.ndim != 2:
-            raise ValueError("Your data is not a 2D matrix. Actual size: {0}".format(X.shape))
+            raise ValueError("Your data is not a 2D matrix. "
+                             "Actual size: {0}".format(X.shape))
 
         if X.shape[1] != self.data_dim:
-            raise ValueError("Your data size != weight dim: {0}, expected {1}".format(X.shape[1], self.data_dim))
+            raise ValueError("Your data size != weight dim: {0}, "
+                             "expected {1}".format(X.shape[1], self.data_dim))
 
     def _predict_base(self, X, batch_size=100, show_progressbar=False):
         """
@@ -493,11 +611,11 @@ class Som(object):
         self._check_input(X)
 
         xp = cp.get_array_module()
-        batched = self._create_batches(X, batch_size)
+        batched = self._create_batches(X, batch_size, shuffle_data=False)
 
         activations = []
 
-        for x in tqdm(batched):
+        for x in tqdm(batched, disable=not show_progressbar):
             activations.extend(self.forward(x)[0])
 
         activations = xp.asarray(activations, dtype=xp.float32)
@@ -612,30 +730,20 @@ class Som(object):
         if len(X) != len(identities):
             raise ValueError("X and identities are not the same length: {0} and {1}".format(len(X), len(identities)))
 
-        # Remove all duplicates from X
-        X_unique, names = list(), list()
-        for idx, name in enumerate(identities):
-            if name not in set(names):
-                names.append(name)
-                X_unique.append(idx)
-
-        X_unique = X[X_unique]
-        names = list(names)
+        # Find all unique items in X
+        X_unique, indices = np.unique(X, return_index=True, axis=0)
 
         node_match = []
 
-        for node in self.weights:
+        distances, _ = self.distance_function(X_unique, self.weights)
 
-            differences = node - X_unique
-            distances = xp.linalg.norm(differences, axis=1)
-            # Ugly line to make the work on both CPU and GPU.
-            # cupy returns arrays for vectors on which argmin
-            # called, so we use another min on the resulting
-            if xp != np:
-                distances = distances.get()
+        if xp != np:
+            distances = distances.get()
 
-            x = distances.argmin()
-            node_match.append(names[x])
+        print(distances.shape)
+
+        for d in distances.argmin(0):
+            node_match.append(identities[indices[d]])
 
         return node_match
 
@@ -647,7 +755,8 @@ class Som(object):
         """
         width, height = self.map_dimensions
         # Reshape to appropriate dimensions
-        return self.weights.reshape((width, height, self.data_dim)).transpose(1, 0, 2)
+        w = self.scaler.inverse_transform(self.weights)
+        return w.reshape((width, height, self.data_dim)).transpose(1, 0, 2)
 
     @classmethod
     def load(cls, path, array_type=np):

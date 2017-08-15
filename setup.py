@@ -6,14 +6,14 @@ from setuptools import find_packages
 
 
 setup(name='somber',
-      version='1.0.0',
+      version='1.1.0',
       description='Self-Organizing Maps in Numpy',
       author='Stéphan Tulkens',
       author_email='stephan.tulkens@uantwerpen.be',
       url='https://github.com/stephantul/somber',
       license='MIT',
       packages=find_packages(exclude=['examples']),
-      install_requires=['numpy>=1.11.0'],
+      install_requires=['numpy>=1.11.0', 'cupy>=1.0.0.1'],
       classifiers=[
           'Intended Audience :: Developers',
 
