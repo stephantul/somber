@@ -10,7 +10,6 @@ from .utils import linear, expo, np_min, resize
 from functools import reduce
 from collections import Counter, defaultdict
 from sklearn.decomposition import PCA
-from sklearn.preprocessing import StandardScaler
 
 
 logger = logging.getLogger(__name__)
@@ -72,8 +71,6 @@ class Scaler(object):
         :param X: The data to perform an inverse transform on.
         :param return: The unscaled version of the data.
         """
-        # Round to ensure that very small differences don't
-        # cause arrays to become inequal.
         return ((X * self.std) + self.mean)
 
 
@@ -127,10 +124,6 @@ class Som(object):
         # The dimensionality of the weight vector
         # Usually (width * height)
         self.weight_dim = int(reduce(np.multiply, map_dim, 1))
-
-        # Weights are initialized to small random values.
-        # Initializing to more appropriate values given the dataset
-        # will probably give faster convergence.
         self.weights = np.zeros((self.weight_dim, data_dim))
         self.data_dim = data_dim
 
@@ -140,7 +133,7 @@ class Som(object):
         self.nbfunc = nbfunc
 
         # Initialize the distance grid: only needs to be done once.
-        self.distance_grid = None
+        self.distance_grid = self._initialize_distance_grid()
         self.min_max = min_max
         self.trained = False
         self.scaler = Scaler()
@@ -209,10 +202,16 @@ class Som(object):
             # Subtract mean from data.
             mean = X.mean(0)
             temp = X - mean
+
+            # Randomized PCA
             pca = PCA(n_components=2, svd_solver='randomized')
             pca.fit(temp)
+
+            # The eigenvectors are the components of the PCA
             eigvec = pca.components_
+            # The eigenvalues are the explained variance.
             eigval = pca.explained_variance_
+            # Take 2-norm of the eigenvectors.
             norms = np.sqrt(np.sum(np.square(eigvec), 1))
             eigvec = ((eigvec.T/norms)*eigval).T
 
@@ -233,7 +232,6 @@ class Som(object):
 
         batched = self._create_batches(X, batch_size)
         self._ensure_params(batched)
-        self.distance_grid = self._initialize_distance_grid(batched)
 
         # The step size is the number of items between epochs.
         step_size_lr = max((train_len * stop_lr_updates) // total_updates, 1)
@@ -296,8 +294,9 @@ class Som(object):
         """
         xp = cp.get_array_module(X)
         self.weights = xp.asarray(self.weights, xp.float32)
+        self.distance_grid = xp.asarray(self.distance_grid, xp.int32)
 
-    def _init_prev(self, x):
+    def t_prev(self, x):
         """
         Placeholder.
 
@@ -347,7 +346,7 @@ class Som(object):
         X = self._create_batches(X, batch_size)
 
         # Initialize the previous activation
-        prev_activation = self._init_prev(X)
+        prev_activation = self.t_prev(X)
 
         # Calculate the influences for update 0.
         learning_rate = self.lrfunc(self.learning_rate,
@@ -546,15 +545,15 @@ class Som(object):
         grid = xp.exp(-self.distance_grid / (2.0 * sigma ** 2))
         return grid.reshape(self.weight_dim, self.weight_dim)[:, :, None]
 
-    def _initialize_distance_grid(self, X):
+    def _initialize_distance_grid(self):
         """
         Initialize the distance grid by calls to _grid_dist.
 
         :return:
         """
-        xp = cp.get_array_module(X)
         p = [self._grid_distance(i) for i in range(self.weight_dim)]
-        return xp.array(p, dtype=xp.float32)
+        # Assume the distance grid is a numpy array until proven otherwise.
+        return np.array(p)
 
     def _grid_distance(self, index):
         """
@@ -659,6 +658,39 @@ class Som(object):
         else:
             return res.get()
 
+    def topographic_error(self, X, batch_size=1):
+        """
+        Calculate the topographic error.
+
+        The topographic error is a measure of the spatial organization of the
+        map. Maps in which the most similar neurons are also close on the
+        grid have low topographic error and indicate that a problem has been
+        learned correctly.
+
+        Formally, the topographic error is the proportion of units for which
+        the two most similar neurons are not direct neighbors on the map.
+
+        :param X: Input data.
+        :param batch_size: The batch size to use when calculating
+        the quantization error. Recommended to not raise this.
+        :return: A vector of numbers, representing the topographic error
+        for each data point.
+        """
+        dist = self._predict_base(X, batch_size)
+        xp = cp.get_array_module(dist)
+        # Need to do a get here because cupy doesn't have argsort.
+        if xp == cp:
+            dist = dist.get()
+        # Sort the distances and get the indices of the two smallest distances
+        # for each datapoint.
+        res = dist.argsort(1)[:, :2]
+        # Lookup the euclidean distance between these points in the distance
+        # grid
+        dgrid = self.distance_grid.reshape(self.weight_dim, self.weight_dim)
+        res = np.asarray([dgrid[x, y] for x, y in res])
+        # Subtract 1.0 because 1.0 is the smallest distance.
+        return np.sum(res > 1.0) / len(res)
+
     def receptive_field(self,
                         X,
                         identities,
@@ -685,7 +717,8 @@ class Som(object):
         :return: The receptive field of each neuron.
         """
         if len(X) != len(identities):
-            raise ValueError("X and identities are not the same length: {0} and {1}".format(len(X), len(identities)))
+            raise ValueError("X and identities are not the same length: "
+                             "{0} and {1}".format(len(X), len(identities)))
 
         receptive_fields = defaultdict(list)
         predictions = self.predict(X, batch_size)
@@ -728,7 +761,8 @@ class Som(object):
         xp = cp.get_array_module(X)
 
         if len(X) != len(identities):
-            raise ValueError("X and identities are not the same length: {0} and {1}".format(len(X), len(identities)))
+            raise ValueError("X and identities are not the same length: "
+                             "{0} and {1}".format(len(X), len(identities)))
 
         # Find all unique items in X
         X_unique, indices = np.unique(X, return_index=True, axis=0)
