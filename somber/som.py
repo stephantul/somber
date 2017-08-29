@@ -774,8 +774,6 @@ class Som(object):
         if xp != np:
             distances = distances.get()
 
-        print(distances.shape)
-
         for d in distances.argmin(0):
             node_match.append(identities[indices[d]])
 
