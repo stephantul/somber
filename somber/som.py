@@ -1,131 +1,70 @@
 import logging
 import time
-
+import types
 import json
 import cupy as cp
 import numpy as np
 
 from tqdm import tqdm
-from .utils import linear, expo, np_min, resize
-from functools import reduce
+from .components.utilities import linear, expo, resize, Scaler, shuffle
+from .components.initializers import range_initialization
 from collections import Counter, defaultdict
-from sklearn.decomposition import PCA
 
 
 logger = logging.getLogger(__name__)
 
 
-class Scaler(object):
-    """Simple scaler based on mean and stdev."""
-
-    def __init__(self):
-        """
-        Scales data based on the mean and standard deviation.
-
-        Reimplemented because this needs to deal with both numpy and cupy
-        arrays.
-        """
-        self.mean = 0
-        self.std = 0
-        self.is_fit = False
-
-    def fit_transform(self, X):
-        """
-        Fit and transform the scaler based on some data.
-
-        :param X: The input data as an array.
-        :return: A scaled version of said array.
-        """
-        self.fit(X)
-        return self.transform(X)
-
-    def fit(self, X):
-        """
-        Fit the scaler based on some data.
-
-        Gets the mean  and standard deviation of all feature values
-        and stores them.
-
-        :param X: The input data as an array.
-        """
-        self.mean = X.mean(0)
-        self.std = X.std(0)
-        self.is_fit = True
-
-    def transform(self, X):
-        """
-        Transform some data by rescaling it.
-
-        First subtracts the mean from the data, and then divides by the
-        standard deviation.
-
-        :param X: The input data as an array.
-        :return: A scaled version of the array.
-        """
-        return (X-self.mean) / (self.std + 10e-6)
-
-    def inverse_transform(self, X):
-        """
-        Revert the transform function.
-
-        :param X: The data to perform an inverse transform on.
-        :param return: The unscaled version of the data.
-        """
-        return ((X * self.std) + self.mean)
-
-
-def shuffle(array):
-    """Gpu/cpu-agnostic shuffle function."""
-    xp = cp.get_array_module(array)
-    z = array.copy()
-    if xp == cp:
-        z = z.get()
-        np.random.shuffle(z)
-        return cp.array(z, dtype=array.dtype)
-    else:
-        np.random.shuffle(z)
-        return z
-
-
 class Som(object):
     """This is a batched version of the basic SOM."""
 
+    # Static property names
+    param_names = {'neighborhood',
+                   'learning_rate',
+                   'map_dimensions',
+                   'weights',
+                   'data_dim',
+                   'lrfunc',
+                   'nbfunc',
+                   'min_max'}
+
     def __init__(self,
-                 map_dim,
-                 data_dim,
+                 map_dimensions,
+                 data_dimensionality,
                  learning_rate,
                  lrfunc=expo,
                  nbfunc=expo,
-                 sigma=None,
-                 min_max=np_min):
+                 neighborhood=None,
+                 argfunc="argmin",
+                 valfunc="min",
+                 initializer=range_initialization):
         """
         A batched Self-Organizing-Map.
 
-        :param map_dim: A tuple describing the MAP size.
-        :param data_dim: The dimensionality of the input matrix.
+        :param map_dimensions: A tuple describing the MAP size.
+        :param data_dimensionality: The dimensionality of the input matrix.
         :param learning_rate: The learning rate.
         :param sigma: The neighborhood factor.
         :param lrfunc: The function used to decrease the learning rate.
         :param nbfunc: The function used to decrease the neighborhood
         :param min_max: The function used to determine the winner.
         """
-        if sigma is not None:
-            self.sigma = sigma
+        if neighborhood is not None:
+            self.neighborhood = neighborhood
         else:
             # Add small constant to sigma to prevent
-            # divide by zero for maps of size 2.
-            self.sigma = (max(map_dim) / 2.0) + 0.01
+            # divide by zero for maps with the same max_dim as the number
+            # of dimensions.
+            self.neighborhood = max(map_dimensions) / 2
+            self.neighborhood += 0.0001
 
         self.learning_rate = learning_rate
         # A tuple of dimensions
-        # Usually (width, height), but can accomodate one-dimensional maps.
-        self.map_dimensions = map_dim
+        # Usually (width, height), but can accomodate N-dimensional maps.
+        self.map_dimensions = map_dimensions
 
-        # The dimensionality of the weight vector
-        # Usually (width * height)
-        self.weight_dim = int(reduce(np.multiply, map_dim, 1))
-        self.weights = np.zeros((self.weight_dim, data_dim))
-        self.data_dim = data_dim
+        self.weight_dim = np.int(np.prod(map_dimensions))
+        self.weights = np.zeros((self.weight_dim, data_dimensionality))
+        self.data_dim = data_dimensionality
 
         # The function used to diminish the learning rate.
         self.lrfunc = lrfunc
@@ -134,15 +73,16 @@ class Som(object):
 
         # Initialize the distance grid: only needs to be done once.
         self.distance_grid = self._initialize_distance_grid()
-        self.min_max = min_max
+        self.argfunc = argfunc
+        self.valfunc = valfunc
         self.trained = False
         self.scaler = Scaler()
+        self.initializer = initializer
 
     def fit(self,
             X,
             num_epochs=10,
-            init_pca=True,
-            total_updates=50,
+            updates_epoch=10,
             stop_lr_updates=1.0,
             stop_nb_updates=1.0,
             batch_size=100,
@@ -184,137 +124,42 @@ class Som(object):
         self._check_input(X)
 
         X = self.scaler.fit_transform(X)
-
         xp.random.seed(seed)
 
-        if init_pca:
-
-            if xp == cp:
-                raise ValueError("PCA is currently not supported on GPU.")
-
-            x = xp.arange(len(self.weights)) // self.map_dimensions[1]
-            y = xp.arange(len(self.weights)) % self.map_dimensions[1]
-            coord = xp.stack([x, y], 1)
-
-            coord = coord / self.map_dimensions[1]
-            coord = (coord - .5) * 2
-
-            # Subtract mean from data.
-            mean = X.mean(0)
-            temp = X - mean
-
-            # Randomized PCA
-            pca = PCA(n_components=2, svd_solver='randomized')
-            pca.fit(temp)
-
-            # The eigenvectors are the components of the PCA
-            eigvec = pca.components_
-            # The eigenvalues are the explained variance.
-            eigval = pca.explained_variance_
-            # Take 2-norm of the eigenvectors.
-            norms = np.sqrt(np.sum(np.square(eigvec), 1))
-            eigvec = ((eigvec.T/norms)*eigval).T
-
-            p = coord[:, :, None] * eigvec[None, :, :]
-            self.weights = p.sum(1) + mean
-            self.weights = xp.array(self.weights)
-        else:
-            min_val = X.min(0)
-            max_val = X.max(0)
-            data_range = min_val + (max_val - min_val)
-            self.weights = data_range * xp.random.rand(len(self.weights),
-                                                       X.shape[1])
-
-        # The train length
-        if batch_size > len(X):
-            batch_size = len(X)
-        train_len = (len(X) * num_epochs) // batch_size
-
-        batched = self._create_batches(X, batch_size)
-        self._ensure_params(batched)
-
-        # The step size is the number of items between epochs.
-        step_size_lr = max((train_len * stop_lr_updates) // total_updates, 1)
-        step_size_nb = max((train_len * stop_nb_updates) // total_updates, 1)
-
-        # Precalculate the number of LR updates.
-        stop_lr = (train_len * stop_lr_updates)
-        lr_update_steps = set(xp.arange(step_size_lr,
-                                        stop_lr + step_size_lr,
-                                        step_size_lr).tolist())
-
-        # Precalculate the number of LR updates.
-        stop_nb = (train_len * stop_nb_updates)
-        nb_update_steps = set(xp.arange(step_size_nb,
-                                        stop_nb + step_size_nb,
-                                        step_size_nb).tolist())
+        if self.initializer:
+            self.weights = self.initializer(X, self.weights)
+        self._ensure_params(X)
 
         start = time.time()
-
-        # Train
-        nb_step = 0
-        lr_step = 0
-        idx = 0
-
-        map_radius = self.nbfunc(self.sigma,
-                                 0,
-                                 len(nb_update_steps))
-
-        learning_rate = self.lrfunc(self.learning_rate,
-                                    0,
-                                    len(lr_update_steps))
-
-        influences = self._calculate_influence(map_radius) * learning_rate
 
         for epoch in range(num_epochs):
 
             logger.info("Epoch {0} of {1}".format(epoch, num_epochs))
+            X_ = self._create_batches(X, batch_size)
 
-            idx, nb_step, lr_step, influences = self._epoch(X,
-                                                            nb_update_steps,
-                                                            lr_update_steps,
-                                                            batch_size,
-                                                            idx,
-                                                            nb_step,
-                                                            lr_step,
-                                                            show_progressbar,
-                                                            influences)
+            self._epoch(X_,
+                        epoch,
+                        num_epochs,
+                        batch_size,
+                        updates_epoch,
+                        show_progressbar=show_progressbar,
+                        update_nb=epoch // num_epochs < stop_nb_updates,
+                        update_lr=epoch // num_epochs < stop_lr_updates)
 
         self.trained = True
         self.weights = self.scaler.inverse_transform(self.weights)
 
         logger.info("Total train time: {0}".format(time.time() - start))
 
-    def _ensure_params(self, X):
-        """
-        Ensure the parameters are of the correct type.
-
-        :param X: The input data
-        :return: None
-        """
-        xp = cp.get_array_module(X)
-        self.weights = xp.asarray(self.weights, xp.float32)
-        self.distance_grid = xp.asarray(self.distance_grid, xp.int32)
-
-    def t_prev(self, x):
-        """
-        Placeholder.
-
-        :param x:
-        :return:
-        """
-        return None
-
     def _epoch(self,
                X,
-               nb_update_steps,
-               lr_update_steps,
+               epoch_idx,
+               num_epochs,
                batch_size,
-               idx,
-               nb_step,
-               lr_step,
-               show_progressbar,
-               influences):
+               update_steps,
+               update_nb,
+               update_lr,
+               show_progressbar):
         """
         Run a single epoch.
 
@@ -338,38 +183,49 @@ class Som(object):
         :param show_progressbar: Whether to show a progress bar or not.
         :return: The index, neighborhood step and learning rate step
         """
-        # Store original data length
-        data_len = X.shape[0]
-        num_processed = 0
+        num = 0
 
-        # Shuffle and batch training data
-        X = self._create_batches(X, batch_size)
+        total_steps = update_steps * num_epochs
+        current_step = update_steps * epoch_idx
+
+        update_step = int(np.ceil(len(X) / update_steps))
+
+        map_radius = self.nbfunc(self.neighborhood,
+                                 current_step,
+                                 total_steps)
+        influences = self._calculate_influence(map_radius)
+
+        learning_rate = self.lrfunc(self.learning_rate,
+                                    current_step,
+                                    total_steps)
 
         # Initialize the previous activation
-        prev_activation = self.t_prev(X)
-
-        # Calculate the influences for update 0.
-        learning_rate = self.lrfunc(self.learning_rate,
-                                    lr_step,
-                                    len(lr_update_steps))
+        prev_activation = self._init_prev(X)
 
         # Iterate over the training data
         for x in tqdm(X, disable=not show_progressbar):
 
-            if num_processed + batch_size > data_len:
-                x = x[:data_len - (num_processed + batch_size)]
+            if num % update_step == 0 and update_lr:
 
-            prev_activation = self._propagate(x,
-                                              influences,
-                                              prev_activation=prev_activation)
+                # Reset the influences back to 1
+                prev_lr = learning_rate
 
-            if idx in nb_update_steps:
+                learning_rate = self.lrfunc(self.learning_rate,
+                                            current_step + num,
+                                            total_steps)
 
-                nb_step += 1
+                logger.info("Updated learning rate: {0}".format(learning_rate))
+                # Recalculate the influences
+                influences *= (learning_rate / prev_lr)
 
-                map_radius = self.nbfunc(self.sigma,
-                                         nb_step,
-                                         len(nb_update_steps))
+            if num % update_step == 0 and update_nb:
+
+                # Exponential decay is based on the number of steps
+                # and max neighborhood size.
+                # factor = len(nb_update_steps) / np.log(self.neighborhood)
+                map_radius = self.nbfunc(self.neighborhood,
+                                         current_step + num,
+                                         total_steps)
                 logger.info("Updated map radius: {0}".format(map_radius))
 
                 # The map radius has been updated, so the influence
@@ -377,23 +233,31 @@ class Som(object):
                 influences = self._calculate_influence(map_radius)
                 influences *= learning_rate
 
-            if idx in lr_update_steps:
-                lr_step += 1
+            prev_activation = self._propagate(x,
+                                              influences,
+                                              prev_activation=prev_activation)
 
-                # Reset the influences back to 1
-                influences /= learning_rate
-                learning_rate = self.lrfunc(self.learning_rate,
-                                            lr_step,
-                                            len(lr_update_steps))
-                logger.info("Updated learning rate: {0}".format(learning_rate))
-                # Recalculate the influences
-                influences *= learning_rate
+            num += 1
 
-            num_processed += batch_size
+    def _ensure_params(self, X):
+        """
+        Ensure the parameters are of the correct type.
 
-            idx += 1
+        :param X: The input data
+        :return: None
+        """
+        xp = cp.get_array_module(X)
+        self.weights = xp.asarray(self.weights, xp.float32)
+        self.distance_grid = xp.asarray(self.distance_grid, xp.int32)
 
-        return idx, nb_step, lr_step, influences
+    def _init_prev(self, x):
+        """
+        Placeholder.
+
+        :param x:
+        :return:
+        """
+        return None
 
     def _create_batches(self, X, batch_size, shuffle_data=True):
         """
@@ -418,7 +282,7 @@ class Som(object):
             batch_size = X.shape[0]
 
         max_x = int(xp.ceil(X.shape[0] / batch_size))
-        X = resize(X, (max_x, batch_size, X.shape[1]))
+        X = resize(X, (max_x, batch_size, X.shape[-1]))
 
         return X
 
@@ -459,8 +323,6 @@ class Som(object):
         done to the every weight node is proportional to its distance from the
         BMU.
 
-        Implicitly uses Oja's Rule: delta_W = alpha * (X - w)
-
         In this case (X - w) has been precomputed for speed, in the
         forward step.
 
@@ -471,7 +333,7 @@ class Som(object):
         xp = cp.get_array_module(x)
         return xp.multiply(x, influence)
 
-    def backward(self, diff_x, influences, activation, **kwargs):
+    def backward(self, diff_x, influences, activations, **kwargs):
         """
         Backward pass through the network, including update.
 
@@ -481,9 +343,14 @@ class Som(object):
         :param kwargs:
         :return: None
         """
-        influence = self._apply_influences(activation, influences)
+        bmu = activations.__getattribute__(self.argfunc)(1)
+        influence = influences[bmu]
         update = self._calculate_update(diff_x, influence)
-        self.weights += update.mean(0)
+        # If batch size is 1 we can leave out the call to mean.
+        if update.shape[0] == 1:
+            self.weights += update[0]
+        else:
+            self.weights += update.mean(0)
 
     def distance_function(self, x, weights):
         """
@@ -514,24 +381,7 @@ class Som(object):
         """
         return x[:, None, :] - weights[None, :, :]
 
-    def _apply_influences(self, activations, influences):
-        """
-        Calculate the BMU using min_max, and get the appropriate influences.
-
-        Then gets the appropriate influence from the neighborhood,
-        given the BMU
-
-        :param activations: A Numpy array of distances.
-        :param influences: A (map_dim, map_dim, data_dim) array
-        describing the influence each node has on each other node.
-        :return: The influence given the bmu, and the index of the bmu itself.
-        """
-        bmu = self.min_max(activations, 1)[1]
-        xp = cp.get_array_module(activations)
-        influences = xp.asarray(influences, dtype=xp.float32)
-        return influences[bmu]
-
-    def _calculate_influence(self, sigma):
+    def _calculate_influence(self, map_radius):
         """
         Pre-calculate the influence for a given value of sigma.
 
@@ -542,7 +392,7 @@ class Som(object):
         :return: The neighborhood
         """
         xp = cp.get_array_module(self.distance_grid)
-        grid = xp.exp(-self.distance_grid / (2.0 * sigma ** 2))
+        grid = xp.exp(-(self.distance_grid) / (2 * (map_radius ** 2)))
         return grid.reshape(self.weight_dim, self.weight_dim)[:, :, None]
 
     def _initialize_distance_grid(self):
@@ -552,7 +402,6 @@ class Som(object):
         :return:
         """
         p = [self._grid_distance(i) for i in range(self.weight_dim)]
-        # Assume the distance grid is a numpy array until proven otherwise.
         return np.array(p)
 
     def _grid_distance(self, index):
@@ -565,16 +414,29 @@ class Som(object):
         :param index: The index for which to calculate the distances.
         :return: A flattened version of the distance array.
         """
-        width, height = self.map_dimensions
+        dimensions = np.cumprod(self.map_dimensions[1::][::-1])[::-1]
+        num_dim = len(self.map_dimensions)
 
-        row = index // height
-        column = index % height
+        coord = []
+        for idx, dim in enumerate(dimensions):
+            if idx != 0:
+                value = (index % dimensions[idx-1]) // dim
+            else:
+                value = index // dim
+            coord.append(value)
 
-        # Fast way to construct distance matrix
-        x = np.abs(np.arange(width) - row) ** 2
-        y = np.abs(np.arange(height) - column) ** 2
+        coord.append(index % self.map_dimensions[-1])
 
-        distance = x[:, None] + y[None, :]
+        for idx, (width, row) in enumerate(zip(self.map_dimensions, coord)):
+            x = np.abs(np.arange(width) - row) ** 2
+            dims = self.map_dimensions[::-1]
+            if idx:
+                dims = dims[:-idx]
+            x = np.broadcast_to(x, dims).T
+            if idx == 0:
+                distance = np.copy(x)
+            else:
+                distance += x
 
         return distance
 
@@ -630,7 +492,7 @@ class Som(object):
         :return: The index of the bmu which best describes the input data.
         """
         dist = self._predict_base(X, batch_size, show_progressbar)
-        res = self.min_max(dist, 1)[1]
+        res = dist.__getattribute__(self.argfunc)(1)
         xp = cp.get_array_module(res)
         if xp == np:
             return res
@@ -651,7 +513,7 @@ class Som(object):
         for each data point.
         """
         dist = self._predict_base(X, batch_size)
-        res = self.min_max(dist, 1)[0]
+        res = dist.__getattribute__(self.valfunc)(1)
         xp = cp.get_array_module(res)
         if xp == np:
             return res
@@ -716,12 +578,12 @@ class Som(object):
         :param batch_size: The batch size to use in prediction
         :return: The receptive field of each neuron.
         """
-        if len(X) != len(identities):
-            raise ValueError("X and identities are not the same length: "
-                             "{0} and {1}".format(len(X), len(identities)))
-
         receptive_fields = defaultdict(list)
         predictions = self.predict(X, batch_size)
+
+        if len(predictions) != len(identities):
+            raise ValueError("X and identities are not the same length: "
+                             "{0} and {1}".format(len(X), len(identities)))
 
         for idx, p in enumerate(predictions.tolist()):
             receptive_fields[p].append(identities[idx+1 - max_len:idx+1])
@@ -781,14 +643,18 @@ class Som(object):
 
     def map_weights(self):
         """
-        Retrieve the grid as a list of lists of weights.
+        Retrieve the grid as a list of lists of weights for visualization.
 
         :return: A three-dimensional Numpy array of values.
         """
-        width, height = self.map_dimensions
+        first_dim = self.map_dimensions[0]
+        if len(self.map_dimensions) != 1:
+            second_dim = np.prod(self.map_dimensions[1:])
+        else:
+            second_dim = 1
+
         # Reshape to appropriate dimensions
-        w = self.scaler.inverse_transform(self.weights)
-        return w.reshape((width, height, self.data_dim)).transpose(1, 0, 2)
+        return self.weights.reshape((first_dim, second_dim, self.data_dim))
 
     @classmethod
     def load(cls, path, array_type=np):
@@ -804,20 +670,16 @@ class Som(object):
 
         weights = data['weights']
         weights = array_type.asarray(weights, dtype=array_type.float32)
-        datadim = weights.shape[1]
 
-        dimensions = data['dimensions']
         lrfunc = expo if data['lrfunc'] == 'expo' else linear
         nbfunc = expo if data['nbfunc'] == 'expo' else linear
-        lr = data['lr']
-        sigma = data['sigma']
 
-        s = cls(dimensions,
-                datadim,
-                lr,
+        s = cls(data['map_dimensions'],
+                data['datadim'],
+                data['learning_rate'],
                 lrfunc=lrfunc,
                 nbfunc=nbfunc,
-                sigma=sigma)
+                neighborhood=data['neighborhood'])
         s.weights = weights
         s.trained = True
 
@@ -831,11 +693,12 @@ class Som(object):
         :return: None
         """
         to_save = {}
-        to_save['weights'] = [[float(w) for w in x] for x in self.weights]
-        to_save['dimensions'] = self.map_dimensions
-        to_save['lrfunc'] = 'expo' if self.lrfunc == expo else 'linear'
-        to_save['nbfunc'] = 'expo' if self.nbfunc == expo else 'linear'
-        to_save['lr'] = self.learning_rate
-        to_save['sigma'] = self.sigma
+        for x in self.param_names:
+            attr = self.__getattribute__(x)
+            if type(attr) == np.ndarray or type(attr) == cp.ndarray:
+                attr = [[float(x) for x in row] for row in attr]
+            elif isinstance(attr, types.FunctionType):
+                attr = attr.__name__
+            to_save[x] = attr
 
         json.dump(to_save, open(path, 'w'))
