@@ -7,6 +7,7 @@ import numpy as np
 from tqdm import tqdm
 from .som import Som, shuffle
 from .components.utilities import expo, linear, resize
+from .components.initializers import range_initialization
 from functools import reduce
 
 logger = logging.getLogger(__name__)
@@ -20,13 +21,15 @@ class Sequential(Som):
     """
 
     def __init__(self,
-                 map_dim,
-                 data_dim,
+                 map_dimensions,
+                 data_dimensionality,
                  learning_rate,
-                 sigma,
                  lrfunc=expo,
                  nbfunc=expo,
-                 min_max="none"):
+                 neighborhood=None,
+                 argfunc="argmin",
+                 valfunc="min",
+                 initializer=range_initialization):
         """
         A base class for sequential SOMs, removing some code duplication.
 
@@ -38,13 +41,14 @@ class Sequential(Som):
         :param nbfunc: The function used to decrease the neighborhood
         :param min_max: The function used to determine the winner.
         """
-        super().__init__(map_dim,
-                         data_dim,
+        super().__init__(map_dimensions,
+                         data_dimensionality,
                          learning_rate,
-                         sigma,
                          lrfunc,
                          nbfunc,
-                         min_max)
+                         neighborhood=neighborhood,
+                         argfunc=argfunc,
+                         valfunc=valfunc)
 
     def _ensure_params(self, X):
         """
@@ -84,7 +88,7 @@ class Sequential(Som):
 
         if X.shape[-1] != self.data_dim:
             raise ValueError("Your data size != weight dim: {0}, "
-                             "expected {1}".format(X.shape[-1], self.data_dim))
+                             "expected {1}".format(X.shape[-1], self.data_dimensionality))
 
     def _create_batches(self, X, batch_size, shuffle_data=True):
         """
@@ -127,7 +131,7 @@ class Sequential(Som):
         """
         pass
 
-    def _predict_base(self, X, batch_size=100, show_progressbar=False):
+    def predict_distance(self, X, batch_size=100, show_progressbar=False):
         """
         Predict distances to some input data.
 
@@ -175,27 +179,29 @@ class Sequential(Som):
 
 class Recursive(Sequential):
 
-    param_names = {'data_dim',
+    param_names = {'data_dimensionality',
                    'learning_rate',
                    'lrfunc',
                    'map_dimensions',
-                   'min_max',
+                   'valfunc',
+                   'argfunc'
                    'nbfunc',
-                   'sigma',
+                   'neighborhood',
                    'weights',
                    'context_weights',
                    'alpha',
                    'beta'}
 
     def __init__(self,
-                 map_dim,
-                 data_dim,
+                 map_dimensions,
+                 data_dimensionality,
                  learning_rate,
                  alpha,
                  beta,
-                 sigma=None,
                  lrfunc=expo,
-                 nbfunc=expo):
+                 nbfunc=expo,
+                 neighborhood=None,
+                 initializer=range_initialization):
         """
         A recursive SOM.
 
@@ -223,13 +229,14 @@ class Recursive(Sequential):
         ((max(map_dim) / 2) + 0.01), which is generally a good value.
         """
 
-        super().__init__(map_dim,
-                         data_dim,
+        super().__init__(map_dimensions,
+                         data_dimensionality,
                          learning_rate,
                          lrfunc,
                          nbfunc,
-                         sigma,
-                         min_max=np_max)
+                         neighborhood,
+                         argfunc="argmax",
+                         valfunc="max")
 
         self.context_weights = np.zeros((self.weight_dim, self.weight_dim),
                                         dtype=np.float32)
@@ -323,7 +330,6 @@ class Recursive(Sequential):
         weights = array_type.asarray(weights, dtype=cp.float32)
         lrfunc = expo if data['lrfunc'] == 'expo' else linear
         nbfunc = expo if data['nbfunc'] == 'expo' else linear
-        min_max = np_min if data['min_max'] == 'np_min' else np_max
 
         try:
             context_weights = data['context_weights']
@@ -340,11 +346,11 @@ class Recursive(Sequential):
             beta = 1.0
 
         s = cls(data['map_dimensions'],
-                data['data_dim'],
+                data['data_dimensionality'],
                 data['learning_rate'],
                 lrfunc=lrfunc,
                 nbfunc=nbfunc,
-                sigma=data['sigma'],
+                neighborhood=data['neighborhood'],
                 alpha=alpha,
                 beta=beta)
 

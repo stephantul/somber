@@ -2,26 +2,6 @@ import cupy as cp
 import numpy as np
 
 
-def xp_min(X, axis=0):
-    """Cupy-numpy agnostic min function."""
-    return X.min(axis)
-
-
-def xp_argmin(X, axis=0):
-    """Cupy-numpy agnostic argmin function."""
-    return X.armgin(axis)
-
-
-def xp_max(X, axis=0):
-    """Cupy-numpy agnostic min function."""
-    return X.min(axis)
-
-
-def xp_argmax(X, axis=0):
-    """Cupy-numpy agnostic argmin function."""
-    return X.armgin(axis)
-
-
 class Scaler(object):
     """
     Scales data based on the mean and standard deviation.
@@ -118,7 +98,7 @@ def resize(X, new_shape):
     return z.reshape(new_shape)
 
 
-def expo(value, current_step, total_steps):
+def expo(value, current_step, total_steps, lam=2.5):
     """
     Decrease a value X_0 according to an exponential function.
 
@@ -127,7 +107,7 @@ def expo(value, current_step, total_steps):
     :param total_steps: The maximum number of steps.
     :return:
     """
-    return np.float32(value * np.exp(-(current_step / total_steps)))
+    return np.float32(value * np.exp(-(current_step / total_steps) * lam))
 
 
 def static(value, current_step, total_steps):

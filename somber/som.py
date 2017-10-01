@@ -22,10 +22,11 @@ class Som(object):
                    'learning_rate',
                    'map_dimensions',
                    'weights',
-                   'data_dim',
+                   'data_dimensionality',
                    'lrfunc',
                    'nbfunc',
-                   'min_max'}
+                   'valfunc',
+                   'argfunc'}
 
     def __init__(self,
                  map_dimensions,
@@ -64,7 +65,7 @@ class Som(object):
 
         self.weight_dim = np.int(np.prod(map_dimensions))
         self.weights = np.zeros((self.weight_dim, data_dimensionality))
-        self.data_dim = data_dimensionality
+        self.data_dimensionality = data_dimensionality
 
         # The function used to diminish the learning rate.
         self.lrfunc = lrfunc
@@ -132,6 +133,9 @@ class Som(object):
 
         start = time.time()
 
+        total_nb_epochs = np.ceil(num_epochs * stop_nb_updates)
+        total_lr_epochs = np.ceil(num_epochs * stop_lr_updates)
+
         for epoch in range(num_epochs):
 
             logger.info("Epoch {0} of {1}".format(epoch, num_epochs))
@@ -139,12 +143,11 @@ class Som(object):
 
             self._epoch(X_,
                         epoch,
-                        num_epochs,
                         batch_size,
                         updates_epoch,
-                        show_progressbar=show_progressbar,
-                        update_nb=epoch // num_epochs < stop_nb_updates,
-                        update_lr=epoch // num_epochs < stop_lr_updates)
+                        total_nb_epochs,
+                        total_lr_epochs,
+                        show_progressbar)
 
         self.trained = True
         self.weights = self.scaler.inverse_transform(self.weights)
@@ -154,11 +157,10 @@ class Som(object):
     def _epoch(self,
                X,
                epoch_idx,
-               num_epochs,
                batch_size,
                update_steps,
-               update_nb,
-               update_lr,
+               total_nb_epochs,
+               total_lr_epochs,
                show_progressbar):
         """
         Run a single epoch.
@@ -185,19 +187,22 @@ class Som(object):
         """
         num = 0
 
-        total_steps = update_steps * num_epochs
+        total_steps_nb = update_steps * total_nb_epochs
+        total_steps_lr = update_steps * total_lr_epochs
         current_step = update_steps * epoch_idx
 
         update_step = int(np.ceil(len(X) / update_steps))
 
         map_radius = self.nbfunc(self.neighborhood,
                                  current_step,
-                                 total_steps)
+                                 total_steps_nb)
         influences = self._calculate_influence(map_radius)
 
         learning_rate = self.lrfunc(self.learning_rate,
                                     current_step,
-                                    total_steps)
+                                    total_steps_lr)
+
+        influences *= learning_rate
 
         # Initialize the previous activation
         prev_activation = self._init_prev(X)
@@ -205,27 +210,26 @@ class Som(object):
         # Iterate over the training data
         for x in tqdm(X, disable=not show_progressbar):
 
-            if num % update_step == 0 and update_lr:
+            if num % update_step == 0 and current_step + num < total_steps_lr:
 
-                # Reset the influences back to 1
                 prev_lr = learning_rate
 
                 learning_rate = self.lrfunc(self.learning_rate,
                                             current_step + num,
-                                            total_steps)
+                                            total_steps_lr)
 
                 logger.info("Updated learning rate: {0}".format(learning_rate))
                 # Recalculate the influences
                 influences *= (learning_rate / prev_lr)
 
-            if num % update_step == 0 and update_nb:
+            if num % update_step == 0 and current_step + num < total_steps_nb:
 
                 # Exponential decay is based on the number of steps
                 # and max neighborhood size.
                 # factor = len(nb_update_steps) / np.log(self.neighborhood)
                 map_radius = self.nbfunc(self.neighborhood,
                                          current_step + num,
-                                         total_steps)
+                                         total_steps_nb)
                 logger.info("Updated map radius: {0}".format(map_radius))
 
                 # The map radius has been updated, so the influence
@@ -350,6 +354,7 @@ class Som(object):
         if update.shape[0] == 1:
             self.weights += update[0]
         else:
+            u = update.mean(0)
             self.weights += update.mean(0)
 
     def distance_function(self, x, weights):
@@ -414,7 +419,7 @@ class Som(object):
         :param index: The index for which to calculate the distances.
         :return: A flattened version of the distance array.
         """
-        dimensions = np.cumprod(self.map_dimensions[1::][::-1])[::-1]
+
         num_dim = len(self.map_dimensions)
 
         coord = []
@@ -455,11 +460,11 @@ class Som(object):
             raise ValueError("Your data is not a 2D matrix. "
                              "Actual size: {0}".format(X.shape))
 
-        if X.shape[1] != self.data_dim:
+        if X.shape[1] != self.data_dimensionality:
             raise ValueError("Your data size != weight dim: {0}, "
-                             "expected {1}".format(X.shape[1], self.data_dim))
+                             "expected {1}".format(X.shape[1], self.data_dimensionality))
 
-    def _predict_base(self, X, batch_size=100, show_progressbar=False):
+    def predict_distance(self, X, batch_size=100, show_progressbar=False):
         """
         Predict distances to some input data.
 
@@ -491,7 +496,7 @@ class Som(object):
         :param batch_size: The batch size to use in prediction.
         :return: The index of the bmu which best describes the input data.
         """
-        dist = self._predict_base(X, batch_size, show_progressbar)
+        dist = self.predict_distance(X, batch_size, show_progressbar)
         res = dist.__getattribute__(self.argfunc)(1)
         xp = cp.get_array_module(res)
         if xp == np:
@@ -512,7 +517,7 @@ class Som(object):
         :return: A vector of numbers, representing the quantization error
         for each data point.
         """
-        dist = self._predict_base(X, batch_size)
+        dist = self.predict_distance(X, batch_size)
         res = dist.__getattribute__(self.valfunc)(1)
         xp = cp.get_array_module(res)
         if xp == np:
@@ -538,7 +543,7 @@ class Som(object):
         :return: A vector of numbers, representing the topographic error
         for each data point.
         """
-        dist = self._predict_base(X, batch_size)
+        dist = self.predict_distance(X, batch_size)
         xp = cp.get_array_module(dist)
         # Need to do a get here because cupy doesn't have argsort.
         if xp == cp:
@@ -552,6 +557,40 @@ class Som(object):
         res = np.asarray([dgrid[x, y] for x, y in res])
         # Subtract 1.0 because 1.0 is the smallest distance.
         return np.sum(res > 1.0) / len(res)
+
+    def neighbors(self):
+        """Get all neighbors for all neurons."""
+        dgrid = self.distance_grid.reshape(self.weight_dim, self.weight_dim)
+        for x, y in zip(*np.nonzero(dgrid <= 2.0)):
+            if x != y:
+                yield x, y
+
+    def neighbor_difference(self):
+        """Get the euclidean distance between a node and its neighbors."""
+        differences = np.zeros(self.weight_dim)
+        num_neighbors = np.zeros(self.weight_dim)
+
+        distance, _ = self.distance_function(self.weights, self.weights)
+        for x, y in self.neighbors():
+            differences[x] += distance[x, y]
+            num_neighbors[x] += 1
+
+        return differences / num_neighbors
+
+    def spread(self, X):
+        """Calculate the spread."""
+        distance, _ = self.distance_function(X, self.weights)
+        dists_per_node = defaultdict(list)
+        for x, y in zip(np.argmin(distance, 1), distance):
+            dists_per_node[x].append(y[x])
+
+        out = np.zeros(self.weight_dim)
+        average_spread = {k: np.mean(v)
+                          for k, v in dists_per_node.items()}
+
+        for x, y in average_spread.items():
+            out[x] = y
+        return out
 
     def receptive_field(self,
                         X,
@@ -612,13 +651,24 @@ class Som(object):
         Calculate the inverted projection.
 
         The inverted projectio of a SOM is created by association each weight
-        with the input datum which matches it the most.
+        with the input which matches it the most, thus giving a good
+        approximation of the "influence" of each input item.
+
         Works best for symbolic (instead of continuous) input data.
 
-        :param X: Input data
-        :param identities: The identities for each
-        input datum, must be same length as X
-        :return: A numpy array with identities, the shape of the map.
+        parameters
+        ==========
+        X : numpy array
+            Input data
+        identities : list
+            A list of names for each of the input data. Must be the same
+            length as X.
+
+        returns
+        =======
+        m : numpy array
+            An array with the same shape as the map
+
         """
         xp = cp.get_array_module(X)
 
@@ -639,13 +689,26 @@ class Som(object):
         for d in distances.argmin(0):
             node_match.append(identities[indices[d]])
 
-        return node_match
+        return np.array(node_match).reshape(self.map_dimensions)
 
     def map_weights(self):
         """
-        Retrieve the grid as a list of lists of weights for visualization.
+        Reshaped weights for visualization.
 
-        :return: A three-dimensional Numpy array of values.
+        The weights are reshaped as
+        (W.shape[0], prod(W.shape[1:-1]), W.shape[2]).
+        This allows one to easily see patterns, even for hyper-dimensional
+        soms.
+
+        For one-dimensional SOMs, the returned array is of shape
+        (W.shape[0], 1, W.shape[2])
+
+        returns
+        =======
+        w : numpy array
+            A three-dimensional array containing the weights in a
+            2D array for easy visualization.
+
         """
         first_dim = self.map_dimensions[0]
         if len(self.map_dimensions) != 1:
@@ -654,17 +717,28 @@ class Som(object):
             second_dim = 1
 
         # Reshape to appropriate dimensions
-        return self.weights.reshape((first_dim, second_dim, self.data_dim))
+        return self.weights.reshape((first_dim, second_dim, self.data_dimensionality))
 
     @classmethod
     def load(cls, path, array_type=np):
         """
-        Load a SOM from a JSON file.
+        Load a SOM from a JSON file saved with this package.
 
-        :param path: The path to the JSON file.
-        :param array_type: The array type to use.
-        Defaults to np, can be eiter numpy or cupy
-        :return: A SOM.
+        Note that it is necessary to specify which array library
+        (i.e. cupy or numpy) you are using.
+
+        parameters
+        ==========
+        path : str
+            The path to the JSON file.
+        array_type : library (i.e. numpy or cupy), optional, default numpy
+            The array library to use.
+
+        returns
+        =======
+        s : cls
+            A som of the specified class.
+
         """
         data = json.load(open(path))
 
@@ -675,23 +749,21 @@ class Som(object):
         nbfunc = expo if data['nbfunc'] == 'expo' else linear
 
         s = cls(data['map_dimensions'],
-                data['datadim'],
+                data['data_dimensionality'],
                 data['learning_rate'],
                 lrfunc=lrfunc,
                 nbfunc=nbfunc,
-                neighborhood=data['neighborhood'])
+                neighborhood=data['neighborhood'],
+                valfunc=data['valfunc'],
+                argfunc=data['argfunc'])
+
         s.weights = weights
         s.trained = True
 
         return s
 
     def save(self, path):
-        """
-        Save a SOM to a JSON file.
-
-        :param path: The path to the JSON file that will be created
-        :return: None
-        """
+        """Save a SOM to a JSON file."""
         to_save = {}
         for x in self.param_names:
             attr = self.__getattribute__(x)
