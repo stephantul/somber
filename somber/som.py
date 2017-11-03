@@ -1,3 +1,4 @@
+"""The standard SOM."""
 import logging
 import time
 import types
@@ -6,7 +7,7 @@ import cupy as cp
 import numpy as np
 
 from tqdm import tqdm
-from .components.utilities import linear, expo, resize, Scaler, shuffle
+from .components.utilities import resize, Scaler, shuffle
 from .components.initializers import range_initialization
 from collections import Counter, defaultdict
 
@@ -15,7 +16,57 @@ logger = logging.getLogger(__name__)
 
 
 class Som(object):
-    """This is a batched version of the basic SOM."""
+    """
+    This is a batched version of the basic SOM.
+
+    parameters
+    ==========
+    map_dimensions : tuple
+        A tuple describing the map size. For example, (10, 10) will create
+        a 10 * 10 map with 100 neurons, while a (10, 10, 10) map with 1000
+        neurons creates a 10 * 10 * 10 map with 1000 neurons.
+    data_dimensionality : int
+        The dimensionality of the input data.
+    learning_rate : float
+        The starting learning rate h0.
+    neighborhood : float, optional, default None.
+        The starting neighborhood n0. If left at None, the value will be
+        calculated as max(map_dimensions) / 2. This value might not be
+        optimal for maps with more than 2 dimensions.
+    argfunc : str, optional, default "argmin"
+        The name of the function which is used for calculating the index of
+        the BMU. This is necessary because we do not know in advance whether
+        we will be receiving cupy or numpy arrays.
+    valfunc : str, optional, default "min"
+        The name of the function which is used for calculating the value of the
+        BMU. This is necessary because we do not know in advance whether
+        we will be receiving cupy or numpy arrays.
+    initializer : function, optional, default range_initialization
+        A function which takes in the input data and weight matrix and returns
+        an initialized weight matrix. The initializers are defined in
+        somber.components.initializers. Can be set to None.
+    scaler : initialized Scaler instance, optional default Scaler()
+        An initialized instance of Scaler() which is used to scale the data
+        to have mean 0 and stdev 1.
+    lr_lambda : float
+        Controls the steepness of the exponential function that decreases
+        the learning rate.
+    nb_lambda : float
+        Controls the steepness of the exponential function that decreases
+        the neighborhood.
+
+    attributes
+    ==========
+    trained : bool
+        Whether the som has been trained.
+    num_neurons : int
+        The dimensionality of the weight matrix, i.e. the number of
+        neurons on the map.
+    distance_grid : numpy or cupy array
+        An array which contains the distance from each neuron to each
+        other neuron.
+
+    """
 
     # Static property names
     param_names = {'neighborhood',
@@ -23,8 +74,8 @@ class Som(object):
                    'map_dimensions',
                    'weights',
                    'data_dimensionality',
-                   'lrfunc',
-                   'nbfunc',
+                   'lr_lambda',
+                   'nb_lambda',
                    'valfunc',
                    'argfunc'}
 
@@ -32,23 +83,14 @@ class Som(object):
                  map_dimensions,
                  data_dimensionality,
                  learning_rate,
-                 lrfunc=expo,
-                 nbfunc=expo,
                  neighborhood=None,
                  argfunc="argmin",
                  valfunc="min",
-                 initializer=range_initialization):
-        """
-        A batched Self-Organizing-Map.
+                 initializer=range_initialization,
+                 scaler=Scaler(),
+                 lr_lambda=2.5,
+                 nb_lambda=2.5):
 
-        :param map_dimensions: A tuple describing the MAP size.
-        :param data_dimensionality: The dimensionality of the input matrix.
-        :param learning_rate: The learning rate.
-        :param sigma: The neighborhood factor.
-        :param lrfunc: The function used to decrease the learning rate.
-        :param nbfunc: The function used to decrease the neighborhood
-        :param min_max: The function used to determine the winner.
-        """
         if neighborhood is not None:
             self.neighborhood = neighborhood
         else:
@@ -63,90 +105,86 @@ class Som(object):
         # Usually (width, height), but can accomodate N-dimensional maps.
         self.map_dimensions = map_dimensions
 
-        self.weight_dim = np.int(np.prod(map_dimensions))
-        self.weights = np.zeros((self.weight_dim, data_dimensionality))
+        self.num_neurons = np.int(np.prod(map_dimensions))
+        self.weights = np.zeros((self.num_neurons, data_dimensionality))
         self.data_dimensionality = data_dimensionality
-
-        # The function used to diminish the learning rate.
-        self.lrfunc = lrfunc
-        # The function used to diminish the neighborhood size.
-        self.nbfunc = nbfunc
 
         # Initialize the distance grid: only needs to be done once.
         self.distance_grid = self._initialize_distance_grid()
         self.argfunc = argfunc
         self.valfunc = valfunc
         self.trained = False
-        self.scaler = Scaler()
+        self.scaler = scaler
         self.initializer = initializer
+        self.nb_lambda = nb_lambda
+        self.lr_lambda = lr_lambda
 
     def fit(self,
             X,
             num_epochs=10,
             updates_epoch=10,
-            stop_lr_updates=1.0,
-            stop_nb_updates=1.0,
-            batch_size=100,
-            show_progressbar=False,
-            seed=44):
+            stop_lr_updates=None,
+            stop_nb_updates=None,
+            batch_size=1,
+            show_progressbar=False):
         """
         Fit the SOM to some data.
 
-        The updates correspond to the number of updates to the parameters
-        (i.e. learning rate, neighborhood, not weights!)
-        to perform during training.
+        parameters
+        ==========
+        X : numpy or cupy array.
+            The input data.
+        num_epochs : int, optional, default 10
+            The number of epochs to train for.
+        updates_epoch : int, optional, default 10
+            The number of updates to perform on the learning rate and
+            neighborhood per epoch. 10 suffices for most problems.
+        stop_lr_updates : int, optional, default None
+            The epoch at which to stop updating the learning rate.
+            If this is set to None, the learning rate is always updated.
+        stop_nb_updates : float, optional, default None
+            The epoch at which to stop updating the neighborhood
+        batch_size : int, optional, default 100
+            The batch size to use. Warning: batching can change your
+            performance dramatically, depending on the task.
 
-        In general, 5 to 10 updates will do for most learning problems.
-        Doing updates to the neighborhood gets more expensive as the
-        size of the map increases. Hence, it is advisable to not make
-        the number of updates too big for your learning problem.
-
-        :param X: the data on which to train.
-        :param num_epochs: the number of epochs for which to train.
-        :param init_pca: Whether to initialize the weights to the
-        first principal components of the input data.
-        :param total_updates: The number of updates to the parameters to do
-        during training.
-        :param stop_lr_updates: A fraction, describing over which portion of
-        the training data the learning rate should decrease. If the total
-        number of updates, for example is 1000, and stop_updates = 0.5,
-        1000 updates will have occurred after half of the examples.
-        After this period, no updates of the parameters will occur.
-        :param stop_nb_updates: A fraction, describing over which portion of
-        the training data the neighborhood should decrease.
-        :param batch_size: the batch size
-        :param show_progressbar: whether to show the progress bar.
-        :param seed: The random seed
-        :return: None
         """
         xp = cp.get_array_module(X)
-
         X = xp.asarray(X, dtype=xp.float32)
         self._check_input(X)
 
         X = self.scaler.fit_transform(X)
-        xp.random.seed(seed)
 
-        if self.initializer:
+        if self.initializer is not None:
             self.weights = self.initializer(X, self.weights)
-        self._ensure_params(X)
 
+        self._ensure_params(X)
         start = time.time()
 
-        total_nb_epochs = np.ceil(num_epochs * stop_nb_updates)
-        total_lr_epochs = np.ceil(num_epochs * stop_lr_updates)
+        if stop_lr_updates is None:
+            stop_lr_updates = num_epochs
+        if stop_nb_updates is None:
+            stop_nb_updates = num_epochs
+
+        total_lr_updates = stop_lr_updates * updates_epoch
+        total_nb_updates = stop_nb_updates * updates_epoch
+
+        one_step = np.exp(-((1.0 - (1.0 / total_nb_updates))) * self.nb_lambda)
+        nb_constant = np.exp(-(1.0 * self.nb_lambda)) / one_step
+
+        one_step = np.exp(-((1.0 - (1.0 / total_lr_updates))) * self.lr_lambda)
+        lr_constant = np.exp(-(1.0 * self.lr_lambda)) / one_step
 
         for epoch in range(num_epochs):
 
             logger.info("Epoch {0} of {1}".format(epoch, num_epochs))
-            X_ = self._create_batches(X, batch_size)
 
-            self._epoch(X_,
+            self._epoch(X,
                         epoch,
                         batch_size,
                         updates_epoch,
-                        total_nb_epochs,
-                        total_lr_epochs,
+                        nb_constant,
+                        lr_constant,
                         show_progressbar)
 
         self.trained = True
@@ -158,82 +196,75 @@ class Som(object):
                X,
                epoch_idx,
                batch_size,
-               update_steps,
-               total_nb_epochs,
-               total_lr_epochs,
+               updates_epoch,
+               nb_constant,
+               lr_constant,
                show_progressbar):
         """
         Run a single epoch.
 
-        This function uses an index parameter which is passed around to see to
-        how many training items the SOM has been exposed globally.
+        This function shuffles the data internally,
+        as this improves performance.
 
-        nb and lr_update_counter hold the indices at which the neighborhood
-        size and learning rates need to be updated.
-        These are therefore also passed around. The nb_step and lr_step
-        parameters indicate how many times the neighborhood
-        and learning rate parameters have been updated already.
+        parameters
+        ==========
+        X : numpy or cupy array
+            The training data.
+        epoch_idx : int
+            The current epoch
+        batch_size : int
+            The batch size
+        updates_epoch : int
+            The number of updates to perform per epoch
+        nb_constant : float
+            The number to multiply the neighborhood with at every update step.
+        lr_constant : float
+            The number to multiply the learning rate with at every update step.
+        show_progressbar : bool
+            Whether to show a progressbar during training.
 
-        :param X: The training data.
-        :param nb_update_steps: The indices at which to
-        update the neighborhood.
-        :param lr_update_steps: The indices at which to
-        update the learning rate.
-        :param idx: The current index.
-        :param nb_step: The current neighborhood step.
-        :param lr_step: The current learning rate step.
-        :param show_progressbar: Whether to show a progress bar or not.
-        :return: The index, neighborhood step and learning rate step
         """
-        num = 0
+        updates_so_far = epoch_idx * updates_epoch
 
-        total_steps_nb = update_steps * total_nb_epochs
-        total_steps_lr = update_steps * total_lr_epochs
-        current_step = update_steps * epoch_idx
+        # Create batches
+        X_ = self._create_batches(X, batch_size)
+        X_len = np.prod(X.shape[:-1])
 
-        update_step = int(np.ceil(len(X) / update_steps))
-
-        map_radius = self.nbfunc(self.neighborhood,
-                                 current_step,
-                                 total_steps_nb)
+        map_radius = self.neighborhood * (nb_constant ** updates_so_far)
         influences = self._calculate_influence(map_radius)
 
-        learning_rate = self.lrfunc(self.learning_rate,
-                                    current_step,
-                                    total_steps_lr)
+        lr_decay = (lr_constant ** updates_so_far)
+        learning_rate = self.learning_rate * lr_decay
 
         influences *= learning_rate
 
+        update_step = np.ceil(X.shape[0] / updates_epoch)
+
         # Initialize the previous activation
-        prev_activation = self._init_prev(X)
+        prev_activation = self._init_prev(X_)
 
         # Iterate over the training data
-        for x in tqdm(X, disable=not show_progressbar):
+        for idx, x in enumerate(tqdm(X_, disable=not show_progressbar)):
 
-            if num % update_step == 0 and current_step + num < total_steps_lr:
+            # Our batches are padded, so we need to
+            # make sure we know when we hit the padding
+            # so we don't inadvertently learn zeroes.
+            diff = X_len - (idx * batch_size)
+            if diff and diff < batch_size:
+                x = x[:diff]
+
+            if idx % update_step == 0:
 
                 prev_lr = learning_rate
-
-                learning_rate = self.lrfunc(self.learning_rate,
-                                            current_step + num,
-                                            total_steps_lr)
-
+                learning_rate *= lr_constant
                 logger.info("Updated learning rate: {0}".format(learning_rate))
-                # Recalculate the influences
+                # Recalculate the influences given learning rate
                 influences *= (learning_rate / prev_lr)
 
-            if num % update_step == 0 and current_step + num < total_steps_nb:
+            if idx % update_step == 0:
 
-                # Exponential decay is based on the number of steps
-                # and max neighborhood size.
-                # factor = len(nb_update_steps) / np.log(self.neighborhood)
-                map_radius = self.nbfunc(self.neighborhood,
-                                         current_step + num,
-                                         total_steps_nb)
                 logger.info("Updated map radius: {0}".format(map_radius))
-
-                # The map radius has been updated, so the influence
-                # needs to be recalculated
+                map_radius *= nb_constant
                 influences = self._calculate_influence(map_radius)
                 influences *= learning_rate
 
@@ -241,41 +272,22 @@ class Som(object):
                                               influences,
                                               prev_activation=prev_activation)
 
-            num += 1
-
     def _ensure_params(self, X):
-        """
-        Ensure the parameters are of the correct type.
-
-        :param X: The input data
-        :return: None
-        """
+        """Ensure the parameters live on the GPU/CPU when the data does."""
         xp = cp.get_array_module(X)
         self.weights = xp.asarray(self.weights, xp.float32)
         self.distance_grid = xp.asarray(self.distance_grid, xp.int32)
 
     def _init_prev(self, x):
-        """
-        Placeholder.
-
-        :param x:
-        :return:
-        """
+        """Initialize recurrent SOMs."""
         return None
 
     def _create_batches(self, X, batch_size, shuffle_data=True):
         """
         Create batches out of a sequence of data.
 
-        Assumes ndim(X) == 2.
-
         This function will append zeros to the end of your data to ensure that
-        all batches are even-sized.
-
-        :param X: A numpy array, representing your input data.
-        Must have 2 dimensions.
-        :param batch_size: The desired batch size.
-        :return: A batched version of your data.
+        all batches are even-sized. These are masked out during training.
         """
         xp = cp.get_array_module(X)
 
@@ -291,122 +303,120 @@ class Som(object):
         return X
 
     def _propagate(self, x, influences, **kwargs):
-        """
-        Propagate a single batch of examples through the network.
-
-        First computes the activation the maps neurons, given a batch.
-        Then updates the weights of the neurons by taking the mean of
-        differences over the batch.
-
-        :param X: an array of data
-        :param influences: The influence at the current epoch,
-        given the learning rate and map size
-        :return: A vector describing activation values for each unit.
-        """
+        """Propagate a single batch of examples through the network."""
         activation, difference_x = self.forward(x)
-        self.backward(difference_x, influences, activation)
+        update = self.backward(difference_x, influences, activation)
+        # If batch size is 1 we can leave out the call to mean.
+        if update.shape[0] == 1:
+            self.weights += update[0]
+        else:
+            self.weights += update.mean(0)
 
         return activation
 
     def forward(self, x, **kwargs):
         """
-        Get the best matching units, based on euclidean distance.
+        Get the best matching neurons, and the difference between inputs.
 
-        :param x: The input vector
-        :return: The activations, and
-         the differences between the input and the weights, which can be
-         reused in the update calculation.
+        Note: it might seem like this function can be replaced by a call to
+        distance function. This is only true for the regular SOM. other
+        SOMs, like the recurrent SOM need more complicated forward pass
+        functions.
+
+        parameters
+        ==========
+        x : numpy or cupy array.
+            The input vector.
+
+        returns
+        =======
+        matrices : tuple of matrices.
+            A tuple containing the activations and differences between
+            neurons and input, respectively.
+
         """
         return self.distance_function(x, self.weights)
-
-    def _calculate_update(self, x, influence):
-        """
-        Multiply the difference vector with the influence vector.
-
-        The influence vector is chosen based on the BMU, so that the update
-        done to the every weight node is proportional to its distance from the
-        BMU.
-
-        In this case (X - w) has been precomputed for speed, in the
-        forward step.
-
-        :param x: The difference vector between the weights and the input.
-        :param influence: The influence the result has on each unit,
-        depending on distance. Already includes the learning rate.
-        """
-        xp = cp.get_array_module(x)
-        return xp.multiply(x, influence)
 
     def backward(self, diff_x, influences, activations, **kwargs):
         """
         Backward pass through the network, including update.
 
-        :param diff_x: The difference between the input data and the weights
-        :param influences: The influences at the current time-step
-        :param activation: The activation at the output layer
-        :param kwargs:
-        :return: None
+        parameters
+        ==========
+        diff_x : numpy or cupy array
+            A matrix containing the differences between the input and neurons.
+        influences : numpy or cupy array
+            A matrix containing the influence each neuron has on each
+            other neuron. This is used to calculate the updates.
+        activations : numpy or cupy array
+            The activations each neuron has to each data point. This is used
+            to calculate the BMU.
+
+        returns
+        =======
+        update : numpy or cupy array
+            A numpy array containing the updates to the neurons.
+
         """
+        xp = cp.get_array_module(diff_x)
+
         bmu = activations.__getattribute__(self.argfunc)(1)
         influence = influences[bmu]
-        update = self._calculate_update(diff_x, influence)
-        # If batch size is 1 we can leave out the call to mean.
-        if update.shape[0] == 1:
-            self.weights += update[0]
-        else:
-            u = update.mean(0)
-            self.weights += update.mean(0)
+        update = xp.multiply(diff_x, influence)
+        return update
 
     def distance_function(self, x, weights):
         """
         Calculate euclidean distance between a batch of input data and weights.
 
-        :param x: The input
-        :param weights: The weights
-        :return: A tuple of matrices,
-        The first matrix is a (batch_size * neurons) matrix of
-        activation values, containing the response of each neuron
-        to each input
-        The second matrix is a (batch_size * neuron) matrix containing
-        the difference between euch neuron and each input.
+        parameters
+        ==========
+        X : numpy or cupy array.
+            The input data.
+        weights : numpy or cupy array.
+            The input data.
+
+        returns
+        =======
+        matrices : tuple of matrices
+            The first matrix is a (batch_size * neurons) matrix of
+            activation values, containing the response of each neuron
+            to each input
+            The second matrix is a (batch_size * neurons) matrix containing
+            the difference between euch neuron and each input.
+
         """
         xp = cp.get_array_module(x)
-        diff = self._distance_difference(x, weights)
+        diff = x[:, None, :] - weights[None, :, :]
         activations = xp.linalg.norm(diff, axis=2)
 
         return activations, diff
 
-    def _distance_difference(self, x, weights):
-        """
-        Calculate the difference between an input and all the weights.
-
-        :param x: The input.
-        :param weights: An array of weights.
-        :return: A vector of differences.
-        """
-        return x[:, None, :] - weights[None, :, :]
-
-    def _calculate_influence(self, map_radius):
+    def _calculate_influence(self, neighborhood):
         """
         Pre-calculate the influence for a given value of sigma.
 
-        The neighborhood has size map_dim * map_dim, so for a 30 * 30 map,
-        the neighborhood will be size (900, 900).  d
+        The neighborhood has size num_neurons * num_neurons, so for a
+        30 * 30 map, the neighborhood will be size (900, 900).
 
-        :param sigma: The neighborhood value.
-        :return: The neighborhood
+        parameters
+        ==========
+        neighborhood : float
+            The neighborhood value.
+
+        returns
+        =======
+        neighborhood : numpy array
+            The influence from each neuron to each other neuron.
+
         """
         xp = cp.get_array_module(self.distance_grid)
-        grid = xp.exp(-(self.distance_grid) / (2 * (map_radius ** 2)))
-        return grid.reshape(self.weight_dim, self.weight_dim)[:, :, None]
+        grid = xp.exp(-(self.distance_grid) / (2 * (neighborhood ** 2)))
+        return grid.reshape(self.num_neurons, self.num_neurons)[:, :, None]
 
     def _initialize_distance_grid(self):
-        """
-        Initialize the distance grid by calls to _grid_dist.
-
-        :return:
-        """
-        p = [self._grid_distance(i) for i in range(self.weight_dim)]
+        """Initialize the distance grid by calls to _grid_dist."""
+        p = [self._grid_distance(i) for i in range(self.num_neurons)]
         return np.array(p)
 
     def _grid_distance(self, index):
@@ -415,12 +425,10 @@ class Som(object):
 
         This is pre-calculated for fast neighborhood calculations
         later on (see _calc_influence).
-
-        :param index: The index for which to calculate the distances.
-        :return: A flattened version of the distance array.
         """
-
-        num_dim = len(self.map_dimensions)
+        # Take every dimension but the first in reverse
+        # then reverse that list again.
+        dimensions = np.cumprod(self.map_dimensions[1::][::-1])[::-1]
 
         coord = []
         for idx, dim in enumerate(dimensions):
@@ -441,7 +449,7 @@ class Som(object):
             if idx == 0:
                 distance = np.copy(x)
             else:
-                distance += x
+                distance += x.T
 
         return distance
 
@@ -452,9 +460,6 @@ class Som(object):
         Ensures that the input data, X, is a 2-dimensional matrix, and that
         the second dimension of this matrix has the same dimensionality as
         the weight matrix.
-
-        :param X: the input data
-        :return: None
         """
         if X.ndim != 2:
             raise ValueError("Your data is not a 2D matrix. "
@@ -462,17 +467,30 @@ class Som(object):
 
         if X.shape[1] != self.data_dimensionality:
             raise ValueError("Your data size != weight dim: {0}, "
-                             "expected {1}".format(X.shape[1], self.data_dimensionality))
+                             "expected {1}".format(X.shape[1],
+                                                   self.data_dimensionality))
 
     def predict_distance(self, X, batch_size=100, show_progressbar=False):
         """
         Predict distances to some input data.
 
-        This function should not be directly used.
+        parameters
+        ==========
+        X : numpy or cupy array.
+            The input data.
+        batch_size : int, optional, default 100
+            The batch size to use in prediction. This may affect prediction
+            in stateful, i.e. sequential SOMs.
+        show_progressbar : bool
+            Whether to show a progressbar during prediction.
 
-        :param X: The input data.
-        :return: A matrix, representing the activation
-        each node has to each input.
+        returns
+        =======
+        predictions : numpy array
+            A matrix containing the distance from each datapoint to all
+            neurons. The distance is normally expressed as euclidean distance,
+            but can be any arbitrary metric.
+
         """
         self._check_input(X)
 
@@ -486,15 +504,27 @@ class Som(object):
 
         activations = xp.asarray(activations, dtype=xp.float32)
         activations = activations[:X.shape[0]]
-        return activations.reshape(X.shape[0], self.weight_dim)
+        return activations.reshape(X.shape[0], self.num_neurons)
 
     def predict(self, X, batch_size=100, show_progressbar=True):
         """
         Predict the BMU for each input data.
 
-        :param X: Input data.
-        :param batch_size: The batch size to use in prediction.
-        :return: The index of the bmu which best describes the input data.
+        parameters
+        ==========
+        X : numpy or cupy array.
+            The input data.
+        batch_size : int, optional, default 100
+            The batch size to use in prediction. This may affect prediction
+            in stateful, i.e. sequential SOMs.
+        show_progressbar : bool
+            Whether to show a progressbar during prediction.
+
+        returns
+        =======
+        predictions : numpy array
+            An array containing the BMU for each input data point.
+
         """
         dist = self.predict_distance(X, batch_size, show_progressbar)
         res = dist.__getattribute__(self.argfunc)(1)
@@ -504,18 +534,25 @@ class Som(object):
         else:
             return res.get()
 
-    def quant_error(self, X, batch_size=1):
+    def quantization_error(self, X, batch_size=1):
         """
         Calculate the quantization error.
 
         Find the the minimum euclidean distance between the units and
         some input.
 
-        :param X: Input data.
-        :param batch_size: The batch size to use when calculating
-        the quantization error. Recommended to not raise this.
-        :return: A vector of numbers, representing the quantization error
-        for each data point.
+        parameters
+        ==========
+        X : numpy or cupy array.
+            The input data.
+        batch_size : int
+            The batch size to use for processing.
+
+        returns
+        =======
+        error : numpy array
+            The error for each data point.
+
         """
         dist = self.predict_distance(X, batch_size)
         res = dist.__getattribute__(self.valfunc)(1)
@@ -537,11 +574,19 @@ class Som(object):
         Formally, the topographic error is the proportion of units for which
         the two most similar neurons are not direct neighbors on the map.
 
-        :param X: Input data.
-        :param batch_size: The batch size to use when calculating
-        the quantization error. Recommended to not raise this.
-        :return: A vector of numbers, representing the topographic error
-        for each data point.
+        parameters
+        ==========
+        X : numpy or cupy array.
+            The input data.
+        batch_size : int
+            The batch size to use when calculating the topographic error.
+
+        returns
+        =======
+        error : numpy array
+            A vector of numbers, representing the topographic error
+            for each data point.
+
         """
         dist = self.predict_distance(X, batch_size)
         xp = cp.get_array_module(dist)
@@ -553,22 +598,22 @@ class Som(object):
         res = dist.argsort(1)[:, :2]
         # Lookup the euclidean distance between these points in the distance
         # grid
-        dgrid = self.distance_grid.reshape(self.weight_dim, self.weight_dim)
+        dgrid = self.distance_grid.reshape(self.num_neurons, self.num_neurons)
         res = np.asarray([dgrid[x, y] for x, y in res])
         # Subtract 1.0 because 1.0 is the smallest distance.
         return np.sum(res > 1.0) / len(res)
 
     def neighbors(self):
         """Get all neighbors for all neurons."""
-        dgrid = self.distance_grid.reshape(self.weight_dim, self.weight_dim)
+        dgrid = self.distance_grid.reshape(self.num_neurons, self.num_neurons)
         for x, y in zip(*np.nonzero(dgrid <= 2.0)):
             if x != y:
                 yield x, y
 
     def neighbor_difference(self):
         """Get the euclidean distance between a node and its neighbors."""
-        differences = np.zeros(self.weight_dim)
-        num_neighbors = np.zeros(self.weight_dim)
+        differences = np.zeros(self.num_neurons)
+        num_neighbors = np.zeros(self.num_neurons)
 
         distance, _ = self.distance_function(self.weights, self.weights)
         for x, y in self.neighbors():
@@ -578,15 +623,31 @@ class Som(object):
         return differences / num_neighbors
 
     def spread(self, X):
-        """Calculate the spread."""
-        distance, _ = self.distance_function(X, self.weights)
-        dists_per_node = defaultdict(list)
-        for x, y in zip(np.argmin(distance, 1), distance):
-            dists_per_node[x].append(y[x])
+        """
+        Calculate the average spread for each node.
 
-        out = np.zeros(self.weight_dim)
+        The average spread is a measure of how far each neuron is from the
+        data points which cluster to it.
+
+        parameters
+        ==========
+        X : numpy array or cupy array
+            The input data.
+
+        returns
+        =======
+        spread : numpy array
+            The average distance from each neuron to each data point.
+
+        """
+        distance, _ = self.distance_function(X, self.weights)
+        dists_per_neuron = defaultdict(list)
+        for x, y in zip(np.argmin(distance, 1), distance):
+            dists_per_neuron[x].append(y[x])
+
+        out = np.zeros(self.num_neurons)
         average_spread = {k: np.mean(v)
-                          for k, v in dists_per_node.items()}
+                          for k, v in dists_per_neuron.items()}
 
         for x, y in average_spread.items():
             out[x] = y
@@ -606,16 +667,31 @@ class Som(object):
         specific sequences, it will have longer receptive fields, and therefore
         gives a better description of the dynamics of a given system.
 
-        :param X: Input data.
-        :param identities: The letters associated with each input datum.
-        :param max_len: The maximum length sequence we expect.
-        Increasing the window size leads to accurate results,
-        but costs more memory.
-        :param threshold: The threshold at which we consider a receptive field
-        valid. If at least this proportion of the sequences of a neuron have
-        the same suffix, that suffix is counted as acquired by the SOM.
-        :param batch_size: The batch size to use in prediction
-        :return: The receptive field of each neuron.
+        parameters
+        ==========
+        X : numpy or cupy array
+            Input data.
+        identities : list
+            A list of symbolic identities associated with each input.
+            We expect this list to be as long as the input data.
+        max_len : int, optional, default 10
+            The maximum length to attempt to find. Raising this increases
+            memory use.
+        threshold : float, optional, default .9
+            The threshold at which we consider a receptive field
+            valid. If at least this proportion of the sequences of a neuron
+            have the same suffix, that suffix is counted as acquired by the
+            SOM.
+        batch_size : int, optional, default 1
+            The batch size to use in prediction
+
+        returns
+        =======
+        receptive_fields : dict
+            A dictionary mapping from the neuron id to the found sequences
+            for that neuron. The sequences are represented as lists of
+            symbols from identities.
+
         """
         receptive_fields = defaultdict(list)
         predictions = self.predict(X, batch_size)
@@ -717,7 +793,9 @@ class Som(object):
             second_dim = 1
 
         # Reshape to appropriate dimensions
-        return self.weights.reshape((first_dim, second_dim, self.data_dimensionality))
+        return self.weights.reshape((first_dim,
+                                     second_dim,
+                                     self.data_dimensionality))
 
     @classmethod
     def load(cls, path, array_type=np):
@@ -745,17 +823,14 @@ class Som(object):
         weights = data['weights']
         weights = array_type.asarray(weights, dtype=array_type.float32)
 
-        lrfunc = expo if data['lrfunc'] == 'expo' else linear
-        nbfunc = expo if data['nbfunc'] == 'expo' else linear
-
         s = cls(data['map_dimensions'],
                 data['data_dimensionality'],
                 data['learning_rate'],
-                lrfunc=lrfunc,
-                nbfunc=nbfunc,
                 neighborhood=data['neighborhood'],
                 valfunc=data['valfunc'],
-                argfunc=data['argfunc'])
+                argfunc=data['argfunc'],
+                nb_lambda=data['nb_lambda'],
+                lr_lambda=data['lr_lambda'])
 
         s.weights = weights
         s.trained = True

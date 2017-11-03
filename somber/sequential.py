@@ -6,7 +6,7 @@ import numpy as np
 
 from tqdm import tqdm
 from .som import Som, shuffle
-from .components.utilities import expo, linear, resize
+from .components.utilities import resize, Scaler
 from .components.initializers import range_initialization
 from functools import reduce
 
@@ -14,95 +14,65 @@ logger = logging.getLogger(__name__)
 
 
 class Sequential(Som):
-    """
-    A base class for sequential SOMs, removing some code duplication.
-
-    Not usable stand-alone.
-    """
+    """A base class for sequential SOMs, removing some code duplication."""
 
     def __init__(self,
                  map_dimensions,
                  data_dimensionality,
                  learning_rate,
-                 lrfunc=expo,
-                 nbfunc=expo,
-                 neighborhood=None,
-                 argfunc="argmin",
-                 valfunc="min",
-                 initializer=range_initialization):
-        """
-        A base class for sequential SOMs, removing some code duplication.
+                 neighborhood,
+                 argfunc,
+                 valfunc,
+                 initializer,
+                 scaler,
+                 lr_lambda,
+                 nb_lambda):
 
-        :param map_dim: A tuple describing the MAP size.
-        :param data_dim: The dimensionality of the input matrix.
-        :param learning_rate: The learning rate.
-        :param sigma: The neighborhood factor.
-        :param lrfunc: The function used to decrease the learning rate.
-        :param nbfunc: The function used to decrease the neighborhood
-        :param min_max: The function used to determine the winner.
-        """
         super().__init__(map_dimensions,
                          data_dimensionality,
                          learning_rate,
-                         lrfunc,
-                         nbfunc,
                          neighborhood=neighborhood,
                          argfunc=argfunc,
-                         valfunc=valfunc)
+                         valfunc=valfunc,
+                         initializer=initializer,
+                         scaler=scaler,
+                         lr_lambda=lr_lambda,
+                         nb_lambda=nb_lambda)
 
     def _ensure_params(self, X):
-        """
-        Ensure the parameters are of the correct type.
-
-        :param X: The input data
-        :return: None
-        """
+        """Ensure the parameters live on the GPU/CPU when the data does."""
         xp = cp.get_array_module(X)
         self.weights = xp.asarray(self.weights, xp.float32)
         self.context_weights = xp.asarray(self.context_weights, xp.float32)
 
     def _init_prev(self, X):
-        """
-        Safely initializes the first previous activation.
-
-        :param X: The input data.
-        :return: A matrix of the appropriate size for simulating contexts.
-        """
+        """Initialize the context vector for recurrent SOMs."""
         xp = cp.get_array_module(X)
-        return xp.zeros((X.shape[1], self.weight_dim))
+        return xp.zeros((X.shape[1], self.num_neurons))
 
     def _check_input(self, X):
         """
         Check the input for validity.
 
-        Ensures that the input data, X, is a 2-dimensional matrix, and that
-        the second dimension of this matrix has the same dimensionality as
+        Ensures that the input data, X, is a 3-dimensional matrix, and that
+        the last dimension of this matrix has the same dimensionality as
         the weight matrix.
-
-        :param X: the input data
-        :return: None
         """
         if X.ndim != 3:
             raise ValueError("Your data is not a 3D matrix. "
                              "Actual size: {0}".format(X.shape))
 
-        if X.shape[-1] != self.data_dim:
+        if X.shape[-1] != self.data_dimensionality:
             raise ValueError("Your data size != weight dim: {0}, "
-                             "expected {1}".format(X.shape[-1], self.data_dimensionality))
+                             "expected {1}".format(X.shape[-1],
+                                                   self.data_dimensionality))
 
     def _create_batches(self, X, batch_size, shuffle_data=True):
         """
-        Create subsequences out of a sequential piece of data.
+        Create batches out of a sequence of data.
 
-        Assumes ndim(X) == 3.
-
-        This function will append zeros to the end of your data to make
-        sure all batches even-sized.
-
-        :param X: A numpy array, representing your input data.
-        Must have 3 dimensions.
-        :param batch_size: The desired batch size.
-        :return: A batched version of your data
+        This function will append zeros to the end of your data to ensure that
+        all batches are even-sized. These are masked out during training.
         """
         xp = cp.get_array_module(X)
 
@@ -123,13 +93,8 @@ class Sequential(Som):
         return X.transpose((1, 0, 2))
 
     def forward(self, x, **kwargs):
-        """
-        Empty.
-
-        :param x: the input data
-        :return None
-        """
-        pass
+        """Do a forward pass."""
+        raise ValueError("Base class.")
 
     def predict_distance(self, X, batch_size=100, show_progressbar=False):
         """
@@ -156,21 +121,14 @@ class Sequential(Som):
 
         act = xp.asarray(activations, dtype=xp.float32).transpose((1, 0, 2))
         act = act[:X_shape]
-        return act.reshape(X_shape, self.weight_dim)
+        return act.reshape(X_shape, self.num_neurons)
 
     def generate(self, num_to_generate, starting_place):
-        """
-        Generate data based on some initial position.
-
-        :param num_to_generate: The number of tokens to generate
-        :param starting_place: The place to start from. This should
-        be a vector equal to a context weight.
-        :return:
-        """
+        """Generate data based on some initial position."""
         res = []
         activ = starting_place
         for x in range(num_to_generate):
-            m = np.argmax(activ, 0)
+            m = activ.__getattribute__(self.argfunc)(0)
             res.append(m)
             activ = self.context_weights[m]
 
@@ -178,6 +136,57 @@ class Sequential(Som):
 
 
 class Recursive(Sequential):
+    """
+    A recursive SOM.
+
+    A recursive SOM models sequences through context dependence by not only
+    storing the exemplars in weights, but also storing which exemplars
+    preceded them. Because of this organization, the SOM can recursively
+    "remember" short sequences, which makes it attractive for simple
+    sequence problems, e.g. characters or words.
+
+    parameters
+    ==========
+    map_dimensions : tuple
+        A tuple describing the map size. For example, (10, 10) will create
+        a 10 * 10 map with 100 neurons, while a (10, 10, 10) map with 1000
+        neurons creates a 10 * 10 * 10 map with 1000 neurons.
+    data_dimensionality : int
+        The dimensionality of the input data.
+    learning_rate : float
+        The starting learning rate h0.
+    neighborhood : float, optional, default None.
+        The starting neighborhood n0. If left at None, the value will be
+        calculated as max(map_dimensions) / 2. This value might not be
+        optimal for maps with more than 2 dimensions.
+    initializer : function, optional, default range_initialization
+        A function which takes in the input data and weight matrix and returns
+        an initialized weight matrix. The initializers are defined in
+        somber.components.initializers. Can be set to None.
+    scaler : initialized Scaler instance, optional default Scaler()
+        An initialized instance of Scaler() which is used to scale the data
+        to have mean 0 and stdev 1.
+    lr_lambda : float
+        Controls the steepness of the exponential function that decreases
+        the learning rate.
+    nb_lambda : float
+        Controls the steepness of the exponential function that decreases
+        the neighborhood.
+
+    attributes
+    ==========
+    trained : bool
+        Whether the som has been trained.
+    num_neurons : int
+        The dimensionality of the weight matrix, i.e. the number of
+        neurons on the map.
+    distance_grid : numpy or cupy array
+        An array which contains the distance from each neuron to each
+        other neuron.
+    context_weights : numpy or cupy array
+        The weights which store the context dependence of the neurons.
+
+    """
 
     param_names = {'data_dimensionality',
                    'learning_rate',
@@ -195,89 +204,73 @@ class Recursive(Sequential):
     def __init__(self,
                  map_dimensions,
                  data_dimensionality,
-                 learning_rate,
                  alpha,
                  beta,
-                 lrfunc=expo,
-                 nbfunc=expo,
+                 learning_rate,
                  neighborhood=None,
-                 initializer=range_initialization):
-        """
-        A recursive SOM.
-
-        A recursive SOM models sequences through context dependence by not only
-        storing the exemplars in weights, but also storing which exemplars
-        preceded them. Because of this organization, the SOM can recursively
-        "remember" short sequences, which makes it attractive for simple
-        sequence problems, e.g. characters or words.
-
-        :param map_dim: A tuple of map dimensions,
-        e.g. (10, 10) instantiates a 10 by 10 map.
-        :param data_dim: The data dimensionality.
-        :param learning_rate: The learning rate, which is decreased
-        according to some function.
-        :param lrfunc: The function to use in decreasing the learning rate.
-        The functions are defined in utils. Default is exponential.
-        :param nbfunc: The function to use in decreasing the neighborhood size.
-        The functions are defined in utils. Default is exponential.
-        :param alpha: a float value, specifying how much weight the
-        input value receives in the BMU calculation.
-        :param beta: a float value, specifying how much weight the context
-        receives in the BMU calculation.
-        :param sigma: The starting value for the neighborhood size, which is
-        decreased over time. If sigma is None (default), sigma is calculated as
-        ((max(map_dim) / 2) + 0.01), which is generally a good value.
-        """
+                 initializer=range_initialization,
+                 scaler=Scaler(),
+                 lr_lambda=2.5,
+                 nb_lambda=2.5):
 
         super().__init__(map_dimensions,
                          data_dimensionality,
                          learning_rate,
-                         lrfunc,
-                         nbfunc,
                          neighborhood,
                          argfunc="argmax",
-                         valfunc="max")
+                         valfunc="max",
+                         lr_lambda=lr_lambda,
+                         nb_lambda=nb_lambda,
+                         initializer=initializer,
+                         scaler=scaler)
 
-        self.context_weights = np.zeros((self.weight_dim, self.weight_dim),
+        self.context_weights = np.zeros((self.num_neurons, self.num_neurons),
                                         dtype=np.float32)
         self.alpha = alpha
         self.beta = beta
 
     def _propagate(self, x, influences, **kwargs):
-        """
-        Propagate a single batch of examples through the network.
-
-        First computes the activation the maps neurons, given a batch.
-        Then updates the weights of the neurons by taking the mean of
-        differences over the batch.
-
-        :param X: an array of data
-        :param influences: The influence at the current epoch,
-        given the learning rate and map size
-        :return: A vector describing activation values for each unit.
-        """
         prev = kwargs['prev_activation']
 
         activation, diff_x, diff_y = self.forward(x, prev_activation=prev)
-        self.backward(diff_x, influences, activation, difference_y=diff_y)
+        x_update, y_update = self.backward(diff_x,
+                                           influences,
+                                           activation,
+                                           diff_y=diff_y)
+        # If batch size is 1 we can leave out the call to mean.
+        if x_update.shape[0] == 1:
+            self.weights += x_update[0]
+        else:
+            self.weights += x_update.mean(0)
+
+        if y_update.shape[0] == 1:
+            self.context_weights += y_update[0]
+        else:
+            self.context_weights += y_update.mean(0)
+
         return activation
 
     def forward(self, x, **kwargs):
         """
-        Get the best matching units, based on euclidean distance.
+        Perform a forward pass through the network.
 
-        The euclidean distance between the context vector and context weights
-        and input vector and weights are used to estimate the BMU. The
-        activation of the units is the sum of the distances, weighed by two
-        constants, alpha and beta.
+        The forward pass in recursive som is based on a combination between
+        the activation in the last time-step and the current time-step.
 
-        The exponent of the negative of this value describes the activation
-        of the units. This function is bounded between 0 and 1, where 1 means
-        the unit matches well and 0 means the unit doesn't match at all.
+        parameters
+        ==========
+        x : numpy or cupy array
+            The input data.
+        prev_activation : numpy or cupy array.
+            The activation of the network in the previous time-step.
 
-        :param x: A batch of data.
-        :return: The activation, the difference between the input and weights.
-        and the difference between the context and weights.
+        returns
+        =======
+        activations : tuple of activations and differences
+            A tuple containing the activation of each unit, the differences
+            between the weights and input and the differences between the
+            context input and context weights.
+
         """
         prev = kwargs['prev_activation']
         xp = cp.get_array_module(self.weights)
@@ -292,25 +285,39 @@ class Recursive(Sequential):
 
         return activation, diff_x, diff_y
 
-    def backward(self, diff_x, influences, activation, **kwargs):
+    def backward(self, diff_x, influences, activations, **kwargs):
         """
         Backward pass through the network, including update.
 
-        :param diff_x: The difference between the input data and the weights
-        :param influences: The influences at the current time-step
-        :param activation: The activation at the output
-        :param kwargs:
-        :return: None
+        parameters
+        ==========
+        diff_x : numpy or cupy array
+            A matrix containing the differences between the input and neurons.
+        influences : numpy or cupy array
+            A matrix containing the influence each neuron has on each
+            other neuron. This is used to calculate the updates.
+        activations : numpy or cupy array
+            The activations each neuron has to each data point. This is used
+            to calculate the BMU.
+        differency_y : numpy or cupy array
+            The differences between the input and context neurons.
+
+        returns
+        =======
+        updates : tuple of arrays
+            The updates to the weights and context weights, respectively.
+
         """
         xp = cp.get_array_module(diff_x)
+        diff_y = kwargs['diff_y']
+        bmu = activations.__getattribute__(self.argfunc)(1)
+        influence = influence = influences[bmu]
 
-        diff_y = kwargs['difference_y']
-        influence = self._apply_influences(activation, influences)
         # Update
-        x_update = self._calculate_update(diff_x, influence)
-        self.weights += x_update.mean(0)
-        y_update = self._calculate_update(diff_y, influence)
-        self.context_weights += xp.squeeze(y_update.mean(0))
+        x_update = xp.multiply(diff_x, influence)
+        y_update = xp.multiply(diff_y, influence)
+
+        return x_update, y_update
 
     @classmethod
     def load(cls, path, array_type=np):
@@ -318,18 +325,25 @@ class Recursive(Sequential):
         Load a recursive SOM from a JSON file.
 
         You can use this function to load weights of other SOMs.
-        If there are no context weights, the context weights will be set to 0.
+        If there are no context weights, they will be set to 0.
 
-        :param path: The path to the JSON file.
-        :param array_type: The type of array to load
-        :return: A RecSOM.
+        parameters
+        ==========
+        path : str
+            The path to the JSON file.
+        array_type : library (i.e. numpy or cupy), optional, default numpy
+            The array library to use.
+
+        returns
+        =======
+        s : cls
+            A som of the specified class.
+
         """
         data = json.load(open(path))
 
         weights = data['weights']
         weights = array_type.asarray(weights, dtype=cp.float32)
-        lrfunc = expo if data['lrfunc'] == 'expo' else linear
-        nbfunc = expo if data['nbfunc'] == 'expo' else linear
 
         try:
             context_weights = data['context_weights']
@@ -348,11 +362,11 @@ class Recursive(Sequential):
         s = cls(data['map_dimensions'],
                 data['data_dimensionality'],
                 data['learning_rate'],
-                lrfunc=lrfunc,
-                nbfunc=nbfunc,
                 neighborhood=data['neighborhood'],
                 alpha=alpha,
-                beta=beta)
+                beta=beta,
+                nb_lambda=data['nb_lambda'],
+                lr_lambda=data['lr_lambda'])
 
         s.weights = weights
         s.context_weights = context_weights

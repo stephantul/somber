@@ -2,7 +2,7 @@
 This file contains initializers.
 
 Initializers can be added to a SOM, and will be
-called initialize the weight to a value at the beginning of training.
+called to initialize the weight to a value at the beginning of training.
 """
 import numpy as np
 import cupy as cp

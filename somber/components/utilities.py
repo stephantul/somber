@@ -1,3 +1,4 @@
+"""Utility functions."""
 import cupy as cp
 import numpy as np
 
@@ -80,11 +81,7 @@ def shuffle(array):
 
 
 def resize(X, new_shape):
-    """
-    Resize your data like np.resize.
-
-    Made because cupy currently does not support direct resizing of arrays.
-    """
+    """Resize your data like np.resize."""
     xp = cp.get_array_module(X)
 
     X = X.reshape(np.prod(X.shape[:-1]), X.shape[-1])
@@ -96,37 +93,3 @@ def resize(X, new_shape):
     z = xp.concatenate([X, z])
     # Reshape
     return z.reshape(new_shape)
-
-
-def expo(value, current_step, total_steps, lam=2.5):
-    """
-    Decrease a value X_0 according to an exponential function.
-
-    :param value: The original value.
-    :param current_step: The current timestep.
-    :param total_steps: The maximum number of steps.
-    :return:
-    """
-    return np.float32(value * np.exp(-(current_step / total_steps) * lam))
-
-
-def static(value, current_step, total_steps):
-    """
-    Identity function.
-
-    :param value: the value
-    :return:
-    """
-    return value
-
-
-def linear(value, current_step, total_steps):
-    """
-    Decrease a value X_0 according to a linear function.
-
-    :param value: The original value.
-    :param current_step: The current timestep.
-    :param total_steps: The maximum number of steps.
-    :return:
-    """
-    return (value * (total_steps - current_step) / total_steps) + 0.01
