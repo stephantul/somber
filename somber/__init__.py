@@ -1,4 +1,5 @@
-__all__ = ['som', 'sequential']
+__all__ = ['som', 'sequential', 'ng']
 
 from .som import Som
-from .sequential import Recursive
+from .ng import Ng
+from .sequential import RecursiveSom, RecursiveNg
