@@ -96,7 +96,7 @@ class Sequential(Som):
         """Do a forward pass."""
         raise ValueError("Base class.")
 
-    def predict_distance(self, X, batch_size=100, show_progressbar=False):
+    def predict_distance(self, X, batch_size=1, show_progressbar=False):
         """
         Predict distances to some input data.
 
@@ -109,7 +109,7 @@ class Sequential(Som):
         X_shape = reduce(np.multiply, X.shape[:-1], 1)
 
         xp = cp.get_array_module(X)
-        batched = self._create_batches(X, batch_size)
+        batched = self._create_batches(X, batch_size, shuffle_data=False)
 
         activations = []
 
@@ -190,7 +190,6 @@ class Recursive(Sequential):
 
     param_names = {'data_dimensionality',
                    'learning_rate',
-                   'lrfunc',
                    'map_dimensions',
                    'valfunc',
                    'argfunc'

@@ -252,6 +252,7 @@ class Som(object):
             diff = X_len - (idx * batch_size)
             if diff and diff < batch_size:
                 x = x[:diff]
+                prev_activation = prev_activation[:diff]
 
             if idx % update_step == 0:
 
@@ -506,7 +507,7 @@ class Som(object):
         activations = activations[:X.shape[0]]
         return activations.reshape(X.shape[0], self.num_neurons)
 
-    def predict(self, X, batch_size=100, show_progressbar=True):
+    def predict(self, X, batch_size=1, show_progressbar=False):
         """
         Predict the BMU for each input data.
 
@@ -703,24 +704,24 @@ class Som(object):
         for idx, p in enumerate(predictions.tolist()):
             receptive_fields[p].append(identities[idx+1 - max_len:idx+1])
 
-        sequence = defaultdict(list)
+        rec = {}
 
         for k, v in receptive_fields.items():
-
-            v = [x for x in v if x]
-
-            total = len(v)
-            for row in reversed(list(zip(*v))):
-
-                r = Counter(row)
-
-                for _, count in r.items():
-                    if count / total > threshold:
-                        sequence[k].append(row[0])
+            # if there's only one sequence, we don't know
+            # anything abouw how salient it is.
+            seq = []
+            if len(v) <= 1:
+                continue
+            else:
+                for x in reversed(list(zip(*v))):
+                    x = Counter(x)
+                    if x.most_common(1)[0][1] / sum(x.values()) > threshold:
+                        seq.append(x.most_common(1)[0][0])
                     else:
+                        rec[k] = seq
                         break
 
-        return {k: v[::-1] for k, v in sequence.items()}
+        return rec
 
     def invert_projection(self, X, identities):
         """
