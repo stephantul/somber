@@ -9,22 +9,19 @@ The package currently contains implementations of:
 
   * Regular Som (SOM) (Kohonen, various publications)
   * Recursive Som (RecSOM) (`Voegtlin, 2002 <http://www.sciencedirect.com/science/article/pii/S0893608002000722>`_)
-  * Merge Som (MSOM) (`Hammer and Strickert, 2005 <http://www.sciencedirect.com/science/article/pii/S0925231204005107>`_)
+  * Neural Gas (NG) (`Martinetz & Schulten, 1991 <https://www.ks.uiuc.edu/Publications/Papers/PDF/MART91B/MART91B.pdf>`_)
+  * Recursive Neural Gas (Voegtlin, 2002)
 
 Because these various sequential SOMs rely on internal dynamics for convergence, i.e. they do not fixate on some external label like a regular Recurrent Neural Network, processing in a sequential SOM is currently strictly online. This means that every example is processed separately, and weight updates happen after every example. Research into the development of batching and/or multi-threading is currently underway.
 
 If you need a fast regular SOM, check out `SOMPY <https://github.com/sevamoo/SOMPY>`_, which is a direct port of the MATLAB Som toolbox.
 
-If you need Neural Gas or Growing Neural Gas, check out `Kohonen <https://github.com/lmjohns3/kohonen>`_.
-
 Usage
 -----
 
-Unlike most sequence-based neural network packages, SOMBER doesn't use batches of sentences. The input to a SOMBER is therefore simply a single long sequence.
-
-This makes switching and comparing between non-sequential SOM and the sequential SOMs easy, as the SOM itself will decide whether to pay attention to what came before, and how it will pay attention to what came before.
-
-A consequence of representing everything as a single sequence is that the sequential SOMs assume everything in the sequence depends on what comes before, which might be unsuitable for your problem.
+Care has been taken to make SOMBER easy to use, and function like a drop-in replacement for sklearn-like systems.
+The non-recurrent SOMs take as input (M * N) arrays, where M is the number of samples and N is the number of features.
+The recurrent SOMs take as input (M * S * N) arrays, where M is the number of sequences, S is the number of items per sequence, and N is the number of features.
 
 Examples
 --------
@@ -38,7 +35,7 @@ The color dataset comes from this nice `blog, <https://codesachin.wordpress.com/
 
   import numpy as np
 
-  from somber.batch.som import Som
+  from somber import Som
 
   X = np.array(
        [[0., 0., 0.],
@@ -64,15 +61,16 @@ The color dataset comes from this nice `blog, <https://codesachin.wordpress.com/
        'darkgrey', 'mediumgrey', 'lightgrey']
 
   # initialize
-  s = Som((10, 10), data_dim=3, learning_rate=0.3)
+  s = Som((10, 10), data_dimensionality=3, learning_rate=0.3)
 
   # train
-  s.fit(X, num_epochs=100, total_updates=50)
+  # 10 updates with 10 epochs = 100 updates to the parameters.
+  s.fit(X, num_epochs=10, updates_epoch=10)
 
   # predict: get the index of each best matching unit.
   predictions = s.predict(X)
   # quantization error: how well do the best matching units fit?
-  quantization_error = s.quant_error(X)
+  quantization_error = s.quantization_error(X)
   # inversion: associate each node with the exemplar that fits best.
   inverted = s.invert_projection(X, color_names)
   # Mapping: get weights, mapped to the grid points of the SOM
