@@ -5,39 +5,17 @@ import cupy as cp
 import numpy as np
 
 from tqdm import tqdm
-from .som import Som, shuffle
-from .components.utilities import resize, Scaler
+from .som import Som
+from .ng import Ng
+from .components.utilities import resize, Scaler, shuffle
 from .components.initializers import range_initialization
 from functools import reduce
 
 logger = logging.getLogger(__name__)
 
 
-class Sequential(Som):
+class SequentialMixin(object):
     """A base class for sequential SOMs, removing some code duplication."""
-
-    def __init__(self,
-                 map_dimensions,
-                 data_dimensionality,
-                 learning_rate,
-                 neighborhood,
-                 argfunc,
-                 valfunc,
-                 initializer,
-                 scaler,
-                 lr_lambda,
-                 nb_lambda):
-
-        super().__init__(map_dimensions,
-                         data_dimensionality,
-                         learning_rate,
-                         neighborhood=neighborhood,
-                         argfunc=argfunc,
-                         valfunc=valfunc,
-                         initializer=initializer,
-                         scaler=scaler,
-                         lr_lambda=lr_lambda,
-                         nb_lambda=nb_lambda)
 
     def _ensure_params(self, X):
         """Ensure the parameters live on the GPU/CPU when the data does."""
@@ -132,14 +110,14 @@ class Sequential(Som):
             res.append(m)
             activ = self.context_weights[m]
 
-        return res[::-1]
+        return res
 
 
-class Recursive(Sequential):
+class RecursiveMixin(SequentialMixin):
     """
-    A recursive SOM.
+    A recursive Mixin.
 
-    A recursive SOM models sequences through context dependence by not only
+    A recursive model models sequences through context dependence by not only
     storing the exemplars in weights, but also storing which exemplars
     preceded them. Because of this organization, the SOM can recursively
     "remember" short sequences, which makes it attractive for simple
@@ -189,44 +167,16 @@ class Recursive(Sequential):
     """
 
     param_names = {'data_dimensionality',
-                   'learning_rate',
+                   'params'
+                   'lrfunc',
                    'map_dimensions',
                    'valfunc',
                    'argfunc'
                    'nbfunc',
-                   'neighborhood',
                    'weights',
                    'context_weights',
                    'alpha',
                    'beta'}
-
-    def __init__(self,
-                 map_dimensions,
-                 data_dimensionality,
-                 alpha,
-                 beta,
-                 learning_rate,
-                 neighborhood=None,
-                 initializer=range_initialization,
-                 scaler=Scaler(),
-                 lr_lambda=2.5,
-                 nb_lambda=2.5):
-
-        super().__init__(map_dimensions,
-                         data_dimensionality,
-                         learning_rate,
-                         neighborhood,
-                         argfunc="argmax",
-                         valfunc="max",
-                         lr_lambda=lr_lambda,
-                         nb_lambda=nb_lambda,
-                         initializer=initializer,
-                         scaler=scaler)
-
-        self.context_weights = np.zeros((self.num_neurons, self.num_neurons),
-                                        dtype=np.float32)
-        self.alpha = alpha
-        self.beta = beta
 
     def _propagate(self, x, influences, **kwargs):
         prev = kwargs['prev_activation']
@@ -284,40 +234,6 @@ class Recursive(Sequential):
 
         return activation, diff_x, diff_y
 
-    def backward(self, diff_x, influences, activations, **kwargs):
-        """
-        Backward pass through the network, including update.
-
-        parameters
-        ==========
-        diff_x : numpy or cupy array
-            A matrix containing the differences between the input and neurons.
-        influences : numpy or cupy array
-            A matrix containing the influence each neuron has on each
-            other neuron. This is used to calculate the updates.
-        activations : numpy or cupy array
-            The activations each neuron has to each data point. This is used
-            to calculate the BMU.
-        differency_y : numpy or cupy array
-            The differences between the input and context neurons.
-
-        returns
-        =======
-        updates : tuple of arrays
-            The updates to the weights and context weights, respectively.
-
-        """
-        xp = cp.get_array_module(diff_x)
-        diff_y = kwargs['diff_y']
-        bmu = activations.__getattribute__(self.argfunc)(1)
-        influence = influence = influences[bmu]
-
-        # Update
-        x_update = xp.multiply(diff_x, influence)
-        y_update = xp.multiply(diff_y, influence)
-
-        return x_update, y_update
-
     @classmethod
     def load(cls, path, array_type=np):
         """
@@ -360,15 +276,149 @@ class Recursive(Sequential):
 
         s = cls(data['map_dimensions'],
                 data['data_dimensionality'],
-                data['learning_rate'],
-                neighborhood=data['neighborhood'],
+                data['params']['lr']['orig'],
+                influence=data['params']['infl']['orig'],
                 alpha=alpha,
                 beta=beta,
-                nb_lambda=data['nb_lambda'],
-                lr_lambda=data['lr_lambda'])
+                lr_lambda=data['params']['lr']['factor'],
+                infl_lambda=data['params']['infl']['factor'])
 
         s.weights = weights
         s.context_weights = context_weights
         s.trained = True
 
         return s
+
+
+class RecursiveSom(RecursiveMixin, Som):
+    """Recursive version of the SOM."""
+
+    def __init__(self,
+                 map_dimensions,
+                 data_dimensionality,
+                 learning_rate,
+                 alpha,
+                 beta,
+                 influence=None,
+                 initializer=range_initialization,
+                 scaler=Scaler(),
+                 lr_lambda=2.5,
+                 infl_lambda=2.5):
+
+        super().__init__(map_dimensions,
+                         data_dimensionality,
+                         learning_rate,
+                         influence,
+                         initializer,
+                         scaler,
+                         lr_lambda,
+                         infl_lambda)
+
+        self.alpha = alpha
+        self.beta = beta
+        self.argfunc = 'argmax'
+        self.valfunc = 'max'
+
+        self.context_weights = np.zeros((self.num_neurons, self.num_neurons),
+                                        dtype=np.float32)
+
+    def backward(self, diff_x, influences, activations, **kwargs):
+        """
+        Backward pass through the network, including update.
+
+        parameters
+        ==========
+        diff_x : numpy or cupy array
+            A matrix containing the differences between the input and neurons.
+        influences : numpy or cupy array
+            A matrix containing the influence each neuron has on each
+            other neuron. This is used to calculate the updates.
+        activations : numpy or cupy array
+            The activations each neuron has to each data point. This is used
+            to calculate the BMU.
+        differency_y : numpy or cupy array
+            The differences between the input and context neurons.
+
+        returns
+        =======
+        updates : tuple of arrays
+            The updates to the weights and context weights, respectively.
+
+        """
+        xp = cp.get_array_module(diff_x)
+        diff_y = kwargs['diff_y']
+        bmu = self._get_bmu(activations)
+        influence = influences[bmu]
+
+        # Update
+        x_update = xp.multiply(diff_x, influence)
+        y_update = xp.multiply(diff_y, influence)
+
+        return x_update, y_update
+
+
+class RecursiveNg(RecursiveMixin, Ng):
+    """Recursive version of the neural gas."""
+
+    def __init__(self,
+                 num_neurons,
+                 data_dimensionality,
+                 learning_rate,
+                 alpha,
+                 beta,
+                 influence,
+                 initializer=range_initialization,
+                 scaler=Scaler(),
+                 lr_lambda=2.5,
+                 infl_lambda=2.5):
+
+        super().__init__(num_neurons,
+                         data_dimensionality,
+                         learning_rate,
+                         influence,
+                         initializer,
+                         scaler,
+                         lr_lambda,
+                         infl_lambda)
+
+        self.alpha = alpha
+        self.beta = beta
+        self.argfunc = 'argmax'
+        self.valfunc = 'max'
+
+        self.context_weights = np.zeros((self.num_neurons, self.num_neurons),
+                                        dtype=np.float32)
+
+    def backward(self, diff_x, influences, activations, **kwargs):
+        """
+        Backward pass through the network, including update.
+
+        parameters
+        ==========
+        diff_x : numpy or cupy array
+            A matrix containing the differences between the input and neurons.
+        influences : numpy or cupy array
+            A matrix containing the influence each neuron has on each
+            other neuron. This is used to calculate the updates.
+        activations : numpy or cupy array
+            The activations each neuron has to each data point. This is used
+            to calculate the BMU.
+        differency_y : numpy or cupy array
+            The differences between the input and context neurons.
+
+        returns
+        =======
+        updates : tuple of arrays
+            The updates to the weights and context weights, respectively.
+
+        """
+        xp = cp.get_array_module(diff_x)
+        diff_y = kwargs['diff_y']
+        bmu = self._get_bmu(activations)
+        influence = influences[bmu]
+
+        # Update
+        x_update = xp.multiply(diff_x, influence)
+        y_update = xp.multiply(diff_y, influence)
+
+        return x_update, y_update
