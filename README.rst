@@ -133,7 +133,6 @@ We will also demonstrate that the RecursiveSOM can generate sequences which are 
                    beta=.9)
 
   # train
-  # 10 updates with 10 epochs = 100 updates to the parameters.
   # show a progressbar.
   s.fit(X, num_epochs=100, updates_epoch=10, show_progressbar=True)
 
@@ -150,7 +149,7 @@ We will also demonstrate that the RecursiveSOM can generate sequences which are 
 
   # generate some data by starting from some position.
   # the position can be anything, but must have a dimensionality
-  # equal to the
+  # equal to the number of weights.
   starting_pos = np.ones(s.num_neurons)
   generated_indices = s.generate(50, starting_pos)
 
