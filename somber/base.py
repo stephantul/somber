@@ -499,7 +499,6 @@ class Base(object):
 
         """
         receptive_fields = defaultdict(list)
-        predictions = self.predict(X, batch_size)
 
         if len(predictions) != len(identities):
             raise ValueError("X and identities are not the same length: "

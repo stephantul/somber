@@ -366,24 +366,21 @@ class Som(Base):
         """
         xp = cp.get_array_module(X)
 
-        if len(X) != len(identities):
+        distances = self.predict_distance(X)
+
+        if len(distances) != len(identities):
             raise ValueError("X and identities are not the same length: "
                              "{0} and {1}".format(len(X), len(identities)))
 
-        # Find all unique items in X
-        X_unique, indices = np.unique(X, return_index=True, axis=0)
-
         node_match = []
-
-        distances, _ = self.distance_function(X_unique, self.weights)
 
         if xp != np:
             distances = distances.get()
 
-        for d in distances.argmin(0):
-            node_match.append(identities[indices[d]])
+        for d in distances.__getattribute__(self.argfunc)(0):
+            node_match.append(identities[d])
 
-        return np.array(node_match).reshape(self.map_dimensions)
+        return np.array(node_match)
 
     def map_weights(self):
         """

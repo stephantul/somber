@@ -110,7 +110,7 @@ class SequentialMixin(object):
             res.append(m)
             activ = self.context_weights[m]
 
-        return res[::-1]
+        return res
 
 
 class RecursiveMixin(SequentialMixin):
