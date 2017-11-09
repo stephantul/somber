@@ -123,6 +123,9 @@ class Base(object):
         if self.initializer is not None:
             self.weights = self.initializer(X, self.weights)
 
+        for v in self.params.values():
+            v['value'] = v['orig']
+
         self._ensure_weights(X)
         start = time.time()
 
@@ -156,6 +159,40 @@ class Base(object):
         self.weights = self.scaler.inverse_transform(self.weights)
 
         logger.info("Total train time: {0}".format(time.time() - start))
+
+    def fit_predict(self,
+                    X,
+                    num_epochs=10,
+                    updates_epoch=10,
+                    stop_param_updates=dict(),
+                    batch_size=1,
+                    show_progressbar=False):
+        """First fit, then predict."""
+        self.fit(X,
+                 num_epochs,
+                 updates_epoch,
+                 stop_param_updates,
+                 batch_size,
+                 show_progressbar)
+
+        return self.predict(X, batch_size=batch_size)
+
+    def fit_transform(self,
+                      X,
+                      num_epochs=10,
+                      updates_epoch=10,
+                      stop_param_updates=dict(),
+                      batch_size=1,
+                      show_progressbar=False):
+        """First fit, then transform."""
+        self.fit(X,
+                 num_epochs,
+                 updates_epoch,
+                 stop_param_updates,
+                 batch_size,
+                 show_progressbar)
+
+        return self.transform(X, batch_size=batch_size)
 
     def _epoch(self,
                X,
@@ -366,23 +403,23 @@ class Base(object):
                              "expected {1}".format(X.shape[1],
                                                    self.data_dimensionality))
 
-    def predict_distance(self, X, batch_size=100, show_progressbar=False):
+    def transform(self, X, batch_size=100, show_progressbar=False):
         """
-        Predict distances to some input data.
+        Transform input to a distance matrix by measuring the L2 distance.
 
         parameters
         ==========
         X : numpy or cupy array.
             The input data.
         batch_size : int, optional, default 100
-            The batch size to use in prediction. This may affect prediction
-            in stateful, i.e. sequential SOMs.
+            The batch size to use in transformation. This may affect the
+            transformation in stateful, i.e. sequential SOMs.
         show_progressbar : bool
-            Whether to show a progressbar during prediction.
+            Whether to show a progressbar during transformation.
 
         returns
         =======
-        predictions : numpy array
+        transformed : numpy array
             A matrix containing the distance from each datapoint to all
             neurons. The distance is normally expressed as euclidean distance,
             but can be any arbitrary metric.
@@ -422,7 +459,7 @@ class Base(object):
             An array containing the BMU for each input data point.
 
         """
-        dist = self.predict_distance(X, batch_size, show_progressbar)
+        dist = self.transform(X, batch_size, show_progressbar)
         res = dist.__getattribute__(self.argfunc)(1)
         xp = cp.get_array_module(res)
         if xp == np:
@@ -450,7 +487,7 @@ class Base(object):
             The error for each data point.
 
         """
-        dist = self.predict_distance(X, batch_size)
+        dist = self.transform(X, batch_size)
         res = dist.__getattribute__(self.valfunc)(1)
         xp = cp.get_array_module(res)
         if xp == np:
@@ -555,8 +592,8 @@ class Base(object):
 
         s = cls(data['num_neurons'],
                 data['data_dimensionality'],
-                data['params']['lr']['value'],
-                neighborhood=data['params']['infl']['value'],
+                data['params']['lr']['orig'],
+                neighborhood=data['params']['infl']['orig'],
                 valfunc=data['valfunc'],
                 argfunc=data['argfunc'],
                 lr_lambda=data['params']['lr']['factor'],

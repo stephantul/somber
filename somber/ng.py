@@ -47,8 +47,12 @@ class Ng(Base):
                  lr_lambda=2.5,
                  infl_lambda=2.5):
 
-        params = {'infl': {'value': influence, 'factor': infl_lambda},
-                  'lr': {'value': learning_rate, 'factor': lr_lambda}}
+        params = {'infl': {'value': influence,
+                           'factor': infl_lambda,
+                           'orig': influence},
+                  'lr': {'value': learning_rate,
+                         'factor': lr_lambda,
+                         'orig': learning_rate}}
 
         super().__init__(num_neurons,
                          data_dimensionality,
@@ -64,7 +68,8 @@ class Ng(Base):
         # If the neural gas is a recursive neural gas, we need reverse argsort.
         if self.argfunc == 'argmax':
             activations = -activations
-        return xp.argsort(activations, 1)
+        sort = xp.argsort(activations, 1)
+        return sort.argsort()
 
     def _calculate_influence(self, influence_lambda):
         """Calculate the ranking influence."""
@@ -98,8 +103,8 @@ class Ng(Base):
 
         s = cls(data['num_neurons'],
                 data['data_dimensionality'],
-                data['params']['lr']['value'],
-                influence=data['params']['infl']['value'],
+                data['params']['lr']['orig'],
+                influence=data['params']['infl']['orig'],
                 lr_lambda=data['params']['lr']['factor'],
                 infl_lambda=data['params']['infl']['factor'])
 

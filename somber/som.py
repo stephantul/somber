@@ -96,8 +96,12 @@ class Som(Base):
         self.map_dimensions = map_dimensions
 
         num_neurons = np.int(np.prod(map_dimensions))
-        params = {'infl': {'value': influence, 'factor': infl_lambda},
-                  'lr': {'value': learning_rate, 'factor': lr_lambda}}
+        params = {'infl': {'value': influence,
+                           'factor': infl_lambda,
+                           'orig': influence},
+                  'lr': {'value': learning_rate,
+                         'factor': lr_lambda,
+                         'orig': learning_rate}}
 
         super().__init__(num_neurons,
                          data_dimensionality,
@@ -206,7 +210,7 @@ class Som(Base):
             for each data point.
 
         """
-        dist = self.predict_distance(X, batch_size)
+        dist = self.transform(X, batch_size)
         xp = cp.get_array_module(dist)
         # Need to do a get here because cupy doesn't have argsort.
         if xp == cp:
@@ -366,7 +370,7 @@ class Som(Base):
         """
         xp = cp.get_array_module(X)
 
-        distances = self.predict_distance(X)
+        distances = self.transform(X)
 
         if len(distances) != len(identities):
             raise ValueError("X and identities are not the same length: "
@@ -440,8 +444,8 @@ class Som(Base):
 
         s = cls(data['map_dimensions'],
                 data['data_dimensionality'],
-                data['params']['lr']['value'],
-                influence=data['params']['infl']['value'],
+                data['params']['lr']['orig'],
+                influence=data['params']['infl']['orig'],
                 lr_lambda=data['params']['lr']['factor'],
                 infl_lambda=data['params']['infl']['factor'])
 

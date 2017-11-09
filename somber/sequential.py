@@ -276,8 +276,8 @@ class RecursiveMixin(SequentialMixin):
 
         s = cls(data['map_dimensions'],
                 data['data_dimensionality'],
-                data['params']['lr']['value'],
-                influence=data['params']['infl']['value'],
+                data['params']['lr']['orig'],
+                influence=data['params']['infl']['orig'],
                 alpha=alpha,
                 beta=beta,
                 lr_lambda=data['params']['lr']['factor'],
