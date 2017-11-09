@@ -20,8 +20,8 @@ Usage
 -----
 
 Care has been taken to make SOMBER easy to use, and function like a drop-in replacement for sklearn-like systems.
-The non-recurrent SOMs take as input (M * N) arrays, where M is the number of samples and N is the number of features.
-The recurrent SOMs take as input (M * S * N) arrays, where M is the number of sequences, S is the number of items per sequence, and N is the number of features.
+The non-recurrent SOMs take as input `[M * N]` arrays, where M is the number of samples and N is the number of features.
+The recurrent SOMs take as input `[M * S * N]` arrays, where M is the number of sequences, S is the number of items per sequence, and N is the number of features.
 
 Examples
 --------
