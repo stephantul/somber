@@ -115,9 +115,9 @@ class SequentialMixin(object):
 
 class RecursiveMixin(SequentialMixin):
     """
-    A recursive SOM.
+    A recursive Mixin.
 
-    A recursive SOM models sequences through context dependence by not only
+    A recursive model models sequences through context dependence by not only
     storing the exemplars in weights, but also storing which exemplars
     preceded them. Because of this organization, the SOM can recursively
     "remember" short sequences, which makes it attractive for simple
@@ -167,13 +167,12 @@ class RecursiveMixin(SequentialMixin):
     """
 
     param_names = {'data_dimensionality',
-                   'learning_rate',
+                   'params'
                    'lrfunc',
                    'map_dimensions',
                    'valfunc',
                    'argfunc'
                    'nbfunc',
-                   'neighborhood',
                    'weights',
                    'context_weights',
                    'alpha',
@@ -277,12 +276,12 @@ class RecursiveMixin(SequentialMixin):
 
         s = cls(data['map_dimensions'],
                 data['data_dimensionality'],
-                data['learning_rate'],
-                neighborhood=data['neighborhood'],
+                data['params']['lr']['value'],
+                influence=data['params']['infl']['value'],
                 alpha=alpha,
                 beta=beta,
-                nb_lambda=data['nb_lambda'],
-                lr_lambda=data['lr_lambda'])
+                lr_lambda=data['params']['lr']['factor'],
+                infl_lambda=data['params']['infl']['factor'])
 
         s.weights = weights
         s.context_weights = context_weights
@@ -292,6 +291,7 @@ class RecursiveMixin(SequentialMixin):
 
 
 class RecursiveSom(RecursiveMixin, Som):
+    """Recursive version of the SOM."""
 
     def __init__(self,
                  map_dimensions,
@@ -358,6 +358,7 @@ class RecursiveSom(RecursiveMixin, Som):
 
 
 class RecursiveNg(RecursiveMixin, Ng):
+    """Recursive version of the neural gas."""
 
     def __init__(self,
                  num_neurons,

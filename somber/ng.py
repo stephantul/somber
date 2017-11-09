@@ -8,6 +8,34 @@ from .components.initializers import range_initialization
 
 
 class Ng(Base):
+    """
+    Neural gas.
+
+    parameters
+    ==========
+    num_neurons : int
+        The number of neurons in the neural gas.
+    data_dimensionality : int
+        The dimensionality of your input data.
+    learning_rate : float
+        The starting learning rate.
+    influence : float
+        The starting influence. Sane value is sqrt(num_neurons).
+    initializer : function, optional, default range_initialization
+        A function which takes in the input data and weight matrix and returns
+        an initialized weight matrix. The initializers are defined in
+        somber.components.initializers. Can be set to None.
+    scaler : initialized Scaler instance, optional default Scaler()
+        An initialized instance of Scaler() which is used to scale the data
+        to have mean 0 and stdev 1.
+    lr_lambda : float
+        Controls the steepness of the exponential function that decreases
+        the learning rate.
+    nb_lambda : float
+        Controls the steepness of the exponential function that decreases
+        the neighborhood.
+
+    """
 
     def __init__(self,
                  num_neurons,
@@ -33,6 +61,7 @@ class Ng(Base):
     def _get_bmu(self, activations):
         """Get indices of bmus, sorted by their distance from input."""
         xp = cp.get_array_module(activations)
+        # If the neural gas is a recursive neural gas, we need reverse argsort.
         if self.argfunc == 'argmax':
             activations = -activations
         return xp.argsort(activations, 1)

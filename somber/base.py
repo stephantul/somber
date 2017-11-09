@@ -17,22 +17,19 @@ logger = logging.getLogger(__name__)
 
 class Base(object):
     """
-    This is a batched version of the basic SOM.
+    This is a base class for the Neural gas and SOM.
 
     parameters
     ==========
-    map_dimensions : tuple
-        A tuple describing the map size. For example, (10, 10) will create
-        a 10 * 10 map with 100 neurons, while a (10, 10, 10) map with 1000
-        neurons creates a 10 * 10 * 10 map with 1000 neurons.
+    num_neurons : int
+        The number of neurons to create.
     data_dimensionality : int
         The dimensionality of the input data.
-    learning_rate : float
-        The starting learning rate h0.
-    neighborhood : float, optional, default None.
-        The starting neighborhood n0. If left at None, the value will be
-        calculated as max(map_dimensions) / 2. This value might not be
-        optimal for maps with more than 2 dimensions.
+    params : dict
+        A dictionary describing the parameters which need to be reduced
+        over time. Each parameter is denoted by two fields: "value" and
+        "factor", which denote the current value, and the constant factor
+        with which the value is multiplied in each update step.
     argfunc : str, optional, default "argmin"
         The name of the function which is used for calculating the index of
         the BMU. This is necessary because we do not know in advance whether
@@ -48,23 +45,15 @@ class Base(object):
     scaler : initialized Scaler instance, optional default Scaler()
         An initialized instance of Scaler() which is used to scale the data
         to have mean 0 and stdev 1.
-    lr_lambda : float
-        Controls the steepness of the exponential function that decreases
-        the learning rate.
-    nb_lambda : float
-        Controls the steepness of the exponential function that decreases
-        the neighborhood.
 
     attributes
     ==========
     trained : bool
         Whether the som has been trained.
-    num_neurons : int
-        The dimensionality of the weight matrix, i.e. the number of
-        neurons on the map.
-    distance_grid : numpy or cupy array
-        An array which contains the distance from each neuron to each
-        other neuron.
+    weights : numpy or cupy array
+        The weight matrix.
+    param_names : set
+        The parameter names. Used in saving.
 
     """
 
@@ -103,7 +92,7 @@ class Base(object):
             batch_size=1,
             show_progressbar=False):
         """
-        Fit the SOM to some data.
+        Fit the learner to some data.
 
         parameters
         ==========
@@ -114,14 +103,15 @@ class Base(object):
         updates_epoch : int, optional, default 10
             The number of updates to perform on the learning rate and
             neighborhood per epoch. 10 suffices for most problems.
-        stop_lr_updates : int, optional, default None
-            The epoch at which to stop updating the learning rate.
-            If this is set to None, the learning rate is always updated.
-        stop_nb_updates : float, optional, default None
-            The epoch at which to stop updating the neighborhood
+        stop_param_updates : dict
+            The epoch at which to stop updating each param. This means
+            that the specified parameter will be reduced to 0 at the specified
+            epoch.
         batch_size : int, optional, default 100
             The batch size to use. Warning: batching can change your
             performance dramatically, depending on the task.
+        show_progressbar : bool, optional, default False
+            Whether to show a progressbar during training.
 
         """
         xp = cp.get_array_module(X)
@@ -136,14 +126,18 @@ class Base(object):
         self._ensure_weights(X)
         start = time.time()
 
-        # Needs to move to param initialization function.
+        # Calculate the total number of updates given early stopping.
         updates = {k: stop_param_updates.get(k, num_epochs) * updates_epoch
                    for k, v in self.params.items()}
 
+        # Calculate the value of a single step given the number of allowed
+        # updates.
         single_steps = {k: np.exp(-((1.0 - (1.0 / v)))
                         * self.params[k]['factor'])
                         for k, v in updates.items()}
-        
+
+        # Calculate the factor given the true factor and the value of a
+        # single step.
         constants = {k: np.exp(-self.params[k]['factor']) / v
                      for k, v in single_steps.items()}
 
@@ -215,18 +209,17 @@ class Base(object):
                 x = x[:diff]
                 prev_activation = prev_activation[:diff]
 
-            # needs to move to parameter upfate function.
+            # If we hit an update step, perform an update.
             if idx % update_step == 0:
                 influences = self._update_params(constants)
                 logger.info(self.params)
-                print(self.params)
 
             prev_activation = self._propagate(x,
                                               influences,
                                               prev_activation=prev_activation)
 
     def _update_params(self, constants):
-        """Update params (lr, neighborhood) by multiplying with constant."""
+        """Update params and return new influence."""
         for k, v in constants.items():
             self.params[k]['value'] *= v
 
