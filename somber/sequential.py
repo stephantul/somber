@@ -7,7 +7,7 @@ import numpy as np
 from tqdm import tqdm
 from .som import Som
 from .ng import Ng
-from .components.utilities import Scaler, shuffle
+from .components.utilities import shuffle
 from .components.initializers import range_initialization
 from functools import reduce
 
@@ -114,8 +114,8 @@ class RecursiveMixin(SequentialMixin):
         A function which takes in the input data and weight matrix and returns
         an initialized weight matrix. The initializers are defined in
         somber.components.initializers. Can be set to None.
-    scaler : initialized Scaler instance, optional default Scaler()
-        An initialized instance of Scaler() which is used to scale the data
+    scaler : initialized Scaler instance, optional default None
+        An initialized instance of None which is used to scale the data
         to have mean 0 and stdev 1.
     lr_lambda : float
         Controls the steepness of the exponential function that decreases
@@ -131,10 +131,10 @@ class RecursiveMixin(SequentialMixin):
     num_neurons : int
         The dimensionality of the weight matrix, i.e. the number of
         neurons on the map.
-    distance_grid : numpy or cupy array
+    distance_grid : numpy array
         An array which contains the distance from each neuron to each
         other neuron.
-    context_weights : numpy or cupy array
+    context_weights : numpy array
         The weights which store the context dependence of the neurons.
 
     """
@@ -179,9 +179,9 @@ class RecursiveMixin(SequentialMixin):
 
         parameters
         ==========
-        x : numpy or cupy array
+        x : numpy array
             The input data.
-        prev_activation : numpy or cupy array.
+        prev_activation : numpy array.
             The activation of the network in the previous time-step.
 
         returns
@@ -272,7 +272,7 @@ class RecursiveSom(RecursiveMixin, Som):
                  beta,
                  influence=None,
                  initializer=range_initialization,
-                 scaler=Scaler(),
+                 scaler=None,
                  lr_lambda=2.5,
                  infl_lambda=2.5):
         """Organize your maps recursively."""
@@ -299,15 +299,15 @@ class RecursiveSom(RecursiveMixin, Som):
 
         parameters
         ==========
-        diff_x : numpy or cupy array
+        diff_x : numpy array
             A matrix containing the differences between the input and neurons.
-        influences : numpy or cupy array
+        influences : numpy array
             A matrix containing the influence each neuron has on each
             other neuron. This is used to calculate the updates.
-        activations : numpy or cupy array
+        activations : numpy array
             The activations each neuron has to each data point. This is used
             to calculate the BMU.
-        differency_y : numpy or cupy array
+        differency_y : numpy array
             The differences between the input and context neurons.
 
         returns
@@ -338,7 +338,7 @@ class RecursiveNg(RecursiveMixin, Ng):
                  beta,
                  influence,
                  initializer=range_initialization,
-                 scaler=Scaler(),
+                 scaler=None,
                  lr_lambda=2.5,
                  infl_lambda=2.5):
         """Organize your gas recursively."""
@@ -365,15 +365,15 @@ class RecursiveNg(RecursiveMixin, Ng):
 
         parameters
         ==========
-        diff_x : numpy or cupy array
+        diff_x : numpy array
             A matrix containing the differences between the input and neurons.
-        influences : numpy or cupy array
+        influences : numpy array
             A matrix containing the influence each neuron has on each
             other neuron. This is used to calculate the updates.
-        activations : numpy or cupy array
+        activations : numpy array
             The activations each neuron has to each data point. This is used
             to calculate the BMU.
-        differency_y : numpy or cupy array
+        differency_y : numpy array
             The differences between the input and context neurons.
 
         returns

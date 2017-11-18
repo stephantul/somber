@@ -3,7 +3,6 @@ import logging
 import json
 import numpy as np
 
-from .components.utilities import Scaler
 from .components.initializers import range_initialization
 from collections import Counter, defaultdict
 from .base import Base
@@ -59,7 +58,7 @@ class Som(Base):
     num_neurons : int
         The dimensionality of the weight matrix, i.e. the number of
         neurons on the map.
-    distance_grid : numpy or cupy array
+    distance_grid : numpy array
         An array which contains the distance from each neuron to each
         other neuron.
 
@@ -77,7 +76,7 @@ class Som(Base):
                  learning_rate,
                  influence=None,
                  initializer=range_initialization,
-                 scaler=Scaler(),
+                 scaler=None,
                  lr_lambda=2.5,
                  infl_lambda=2.5):
         """Organize your maps."""
@@ -188,7 +187,7 @@ class Som(Base):
 
         parameters
         ==========
-        X : numpy or cupy array.
+        X : numpy array.
             The input data.
         batch_size : int
             The batch size to use when calculating the topographic error.
@@ -277,7 +276,7 @@ class Som(Base):
 
         parameters
         ==========
-        X : numpy or cupy array
+        X : numpy array
             Input data.
         identities : list
             A list of symbolic identities associated with each input.

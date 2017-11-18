@@ -41,15 +41,16 @@ class Base(object):
         A function which takes in the input data and weight matrix and returns
         an initialized weight matrix. The initializers are defined in
         somber.components.initializers. Can be set to None.
-    scaler : initialized Scaler instance, optional default Scaler()
+    scaler : initialized Scaler instance, optional default None
         An initialized instance of Scaler() which is used to scale the data
-        to have mean 0 and stdev 1.
+        to have mean 0 and stdev 1. If this is set to None, the SOM will
+        create a scaler.
 
     attributes
     ==========
     trained : bool
         Whether the som has been trained.
-    weights : numpy or cupy array
+    weights : numpy array
         The weight matrix.
     param_names : set
         The parameter names. Used in saving.
@@ -71,7 +72,7 @@ class Base(object):
                  argfunc="argmin",
                  valfunc="min",
                  initializer=range_initialization,
-                 scaler=Scaler()):
+                 scaler=None):
         """Organize nothing."""
         self.num_neurons = np.int(num_neurons)
         self.data_dimensionality = data_dimensionality
@@ -82,6 +83,10 @@ class Base(object):
         self.scaler = scaler
         self.initializer = initializer
         self.params = params
+        if scaler is None:
+            self.scaler = Scaler()
+        else:
+            self.scaler = scaler
 
     def fit(self,
             X,
@@ -95,7 +100,7 @@ class Base(object):
 
         parameters
         ==========
-        X : numpy or cupy array.
+        X : numpy array.
             The input data.
         num_epochs : int, optional, default 10
             The number of epochs to train for.
@@ -222,7 +227,7 @@ class Base(object):
 
         parameters
         ==========
-        X : numpy or cupy array
+        X : numpy array
             The training data.
         epoch_idx : int
             The current epoch
@@ -327,7 +332,7 @@ class Base(object):
 
         parameters
         ==========
-        x : numpy or cupy array.
+        x : numpy array.
             The input vector.
 
         returns
@@ -345,18 +350,18 @@ class Base(object):
 
         parameters
         ==========
-        diff_x : numpy or cupy array
+        diff_x : numpy array
             A matrix containing the differences between the input and neurons.
-        influences : numpy or cupy array
+        influences : numpy array
             A matrix containing the influence each neuron has on each
             other neuron. This is used to calculate the updates.
-        activations : numpy or cupy array
+        activations : numpy array
             The activations each neuron has to each data point. This is used
             to calculate the BMU.
 
         returns
         =======
-        update : numpy or cupy array
+        update : numpy array
             A numpy array containing the updates to the neurons.
 
         """
@@ -371,9 +376,9 @@ class Base(object):
 
         parameters
         ==========
-        X : numpy or cupy array.
+        X : numpy array.
             The input data.
-        weights : numpy or cupy array.
+        weights : numpy array.
             The weights
 
         returns
@@ -414,7 +419,7 @@ class Base(object):
 
         parameters
         ==========
-        X : numpy or cupy array.
+        X : numpy array.
             The input data.
         batch_size : int, optional, default 100
             The batch size to use in transformation. This may affect the
@@ -451,7 +456,7 @@ class Base(object):
 
         parameters
         ==========
-        X : numpy or cupy array.
+        X : numpy array.
             The input data.
         batch_size : int, optional, default 100
             The batch size to use in prediction. This may affect prediction
@@ -479,7 +484,7 @@ class Base(object):
 
         parameters
         ==========
-        X : numpy or cupy array.
+        X : numpy array.
             The input data.
         batch_size : int
             The batch size to use for processing.
@@ -511,7 +516,7 @@ class Base(object):
 
         parameters
         ==========
-        X : numpy or cupy array
+        X : numpy array
             Input data.
         identities : list
             A list of symbolic identities associated with each input.
