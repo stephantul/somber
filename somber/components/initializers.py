@@ -5,7 +5,6 @@ Initializers can be added to a SOM, and will be
 called to initialize the weight to a value at the beginning of training.
 """
 import numpy as np
-import cupy as cp
 
 
 def range_initialization(X, weights):
@@ -29,8 +28,6 @@ def range_initialization(X, weights):
         by X.
 
     """
-    xp = cp.get_array_module(X)
-
     datalen = np.prod(X.shape[:-1])
 
     # Randomly initialize weights to cover the range of each feature.
@@ -39,5 +36,5 @@ def range_initialization(X, weights):
     max_val = X_.max(0)
     data_range = max_val - min_val
 
-    return data_range * xp.random.rand(len(weights),
-                                       X.shape[-1]) - xp.abs(min_val)
+    return data_range * np.random.rand(len(weights),
+                                       X.shape[-1]) - np.abs(min_val)

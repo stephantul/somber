@@ -1,13 +1,9 @@
 """The standard SOM."""
 import logging
-import time
-import types
 import json
-import cupy as cp
 import numpy as np
 
-from tqdm import tqdm
-from .components.utilities import resize, Scaler, shuffle
+from .components.utilities import Scaler
 from .components.initializers import range_initialization
 from collections import Counter, defaultdict
 from .base import Base
@@ -84,6 +80,7 @@ class Som(Base):
                  scaler=Scaler(),
                  lr_lambda=2.5,
                  infl_lambda=2.5):
+        """Organize your maps."""
         if influence is None:
             # Add small constant to sigma to prevent
             # divide by zero for maps with the same max_dim as the number
@@ -113,12 +110,6 @@ class Som(Base):
         # Initialize the distance grid: only needs to be done once.
         self.distance_grid = self._initialize_distance_grid()
 
-    def _ensure_params(self, X):
-        """Ensure the parameters live on the GPU/CPU when the data does."""
-        xp = cp.get_array_module(X)
-        self.weights = xp.asarray(self.weights, xp.float32)
-        self.distance_grid = xp.asarray(self.distance_grid, xp.int32)
-
     def _init_prev(self, x):
         """Initialize recurrent SOMs."""
         return None
@@ -141,8 +132,7 @@ class Som(Base):
             The influence from each neuron to each other neuron.
 
         """
-        xp = cp.get_array_module(self.distance_grid)
-        grid = xp.exp(-(self.distance_grid) / (2 * (neighborhood ** 2)))
+        grid = np.exp(-(self.distance_grid) / (2 * (neighborhood ** 2)))
         return grid.reshape(self.num_neurons, self.num_neurons)[:, :, None]
 
     def _initialize_distance_grid(self):
@@ -211,10 +201,6 @@ class Som(Base):
 
         """
         dist = self.transform(X, batch_size)
-        xp = cp.get_array_module(dist)
-        # Need to do a get here because cupy doesn't have argsort.
-        if xp == cp:
-            dist = dist.get()
         # Sort the distances and get the indices of the two smallest distances
         # for each datapoint.
         res = dist.argsort(1)[:, :2]
@@ -368,8 +354,6 @@ class Som(Base):
             An array with the same shape as the map
 
         """
-        xp = cp.get_array_module(X)
-
         distances = self.transform(X)
 
         if len(distances) != len(identities):
@@ -377,9 +361,6 @@ class Som(Base):
                              "{0} and {1}".format(len(X), len(identities)))
 
         node_match = []
-
-        if xp != np:
-            distances = distances.get()
 
         for d in distances.__getattribute__(self.argfunc)(0):
             node_match.append(identities[d])
@@ -417,7 +398,7 @@ class Som(Base):
                                      self.data_dimensionality))
 
     @classmethod
-    def load(cls, path, array_type=np):
+    def load(cls, path):
         """
         Load a SOM from a JSON file saved with this package.
 
@@ -440,7 +421,7 @@ class Som(Base):
         data = json.load(open(path))
 
         weights = data['weights']
-        weights = array_type.asarray(weights, dtype=array_type.float32)
+        weights = np.asarray(weights, dtype=np.float32)
 
         s = cls(data['map_dimensions'],
                 data['data_dimensionality'],

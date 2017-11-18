@@ -1,13 +1,13 @@
+"""The sequential SOMs."""
 import logging
 
 import json
-import cupy as cp
 import numpy as np
 
 from tqdm import tqdm
 from .som import Som
 from .ng import Ng
-from .components.utilities import resize, Scaler, shuffle
+from .components.utilities import Scaler, shuffle
 from .components.initializers import range_initialization
 from functools import reduce
 
@@ -17,55 +17,26 @@ logger = logging.getLogger(__name__)
 class SequentialMixin(object):
     """A base class for sequential SOMs, removing some code duplication."""
 
-    def _ensure_params(self, X):
-        """Ensure the parameters live on the GPU/CPU when the data does."""
-        xp = cp.get_array_module(X)
-        self.weights = xp.asarray(self.weights, xp.float32)
-        self.context_weights = xp.asarray(self.context_weights, xp.float32)
-
     def _init_prev(self, X):
         """Initialize the context vector for recurrent SOMs."""
-        xp = cp.get_array_module(X)
-        return xp.zeros((X.shape[1], self.num_neurons))
+        return np.zeros((X.shape[1], self.num_neurons))
 
-    def _check_input(self, X):
-        """
-        Check the input for validity.
-
-        Ensures that the input data, X, is a 3-dimensional matrix, and that
-        the last dimension of this matrix has the same dimensionality as
-        the weight matrix.
-        """
-        if X.ndim != 3:
-            raise ValueError("Your data is not a 3D matrix. "
-                             "Actual size: {0}".format(X.shape))
-
-        if X.shape[-1] != self.data_dimensionality:
-            raise ValueError("Your data size != weight dim: {0}, "
-                             "expected {1}".format(X.shape[-1],
-                                                   self.data_dimensionality))
-
-    def _create_batches(self, X, batch_size, shuffle_data=True):
+    def _create_batches(self, X, batch_size, shuffle_data=False):
         """
         Create batches out of a sequence of data.
 
         This function will append zeros to the end of your data to ensure that
         all batches are even-sized. These are masked out during training.
         """
-        xp = cp.get_array_module(X)
-
-        # Total length of sequence in items
-        sequence_length = X.shape[0] * X.shape[1]
-
         if shuffle_data:
             X = shuffle(X)
 
-        if batch_size > sequence_length:
-            batch_size = sequence_length
+        if batch_size > X.shape[0]:
+            batch_size = X.shape[0]
 
-        max_x = int(xp.ceil(sequence_length / batch_size))
+        max_x = int(np.ceil(X.shape[0] / batch_size))
         # This line first resizes the data to
-        X = resize(X, (batch_size, max_x, X.shape[2]))
+        X = np.resize(X, (batch_size, max_x, X.shape[1]))
         # Transposes it to (len(X) / batch_size, batch_size, data_dim)
 
         return X.transpose((1, 0, 2))
@@ -86,7 +57,6 @@ class SequentialMixin(object):
 
         X_shape = reduce(np.multiply, X.shape[:-1], 1)
 
-        xp = cp.get_array_module(X)
         batched = self._create_batches(X, batch_size, shuffle_data=False)
 
         activations = []
@@ -97,18 +67,21 @@ class SequentialMixin(object):
             activation = self.forward(x, prev_activation=activation)[0]
             activations.append(activation)
 
-        act = xp.asarray(activations, dtype=xp.float32).transpose((1, 0, 2))
+        act = np.asarray(activations, dtype=np.float32).transpose((1, 0, 2))
         act = act[:X_shape]
         return act.reshape(X_shape, self.num_neurons)
 
     def generate(self, num_to_generate, starting_place):
         """Generate data based on some initial position."""
         res = []
-        activ = starting_place
+        activ = starting_place[None, :]
+        index = activ.__getattribute__(self.argfunc)(1)
+        item = self.weights[index]
         for x in range(num_to_generate):
-            m = activ.__getattribute__(self.argfunc)(0)
-            res.append(m)
-            activ = self.context_weights[m]
+            activ = self.forward(item, prev_activation=activ)[0]
+            index = activ.__getattribute__(self.argfunc)(1)
+            res.append(index)
+            item = self.weights[index]
 
         return res
 
@@ -167,12 +140,10 @@ class RecursiveMixin(SequentialMixin):
     """
 
     param_names = {'data_dimensionality',
-                   'params'
-                   'lrfunc',
+                   'params',
                    'map_dimensions',
                    'valfunc',
-                   'argfunc'
-                   'nbfunc',
+                   'argfunc',
                    'weights',
                    'context_weights',
                    'alpha',
@@ -222,7 +193,7 @@ class RecursiveMixin(SequentialMixin):
 
         """
         prev = kwargs['prev_activation']
-        xp = cp.get_array_module(self.weights)
+
         # Differences is the components of the weights subtracted from
         # the weight vector.
         distance_x, diff_x = self.distance_function(x, self.weights)
@@ -230,12 +201,12 @@ class RecursiveMixin(SequentialMixin):
 
         x_ = distance_x * self.alpha
         y_ = distance_y * self.beta
-        activation = xp.exp(-(x_ + y_))
+        activation = np.exp(-(x_ + y_))
 
         return activation, diff_x, diff_y
 
     @classmethod
-    def load(cls, path, array_type=np):
+    def load(cls, path):
         """
         Load a recursive SOM from a JSON file.
 
@@ -258,14 +229,14 @@ class RecursiveMixin(SequentialMixin):
         data = json.load(open(path))
 
         weights = data['weights']
-        weights = array_type.asarray(weights, dtype=cp.float32)
+        weights = np.asarray(weights, dtype=np.float32)
 
         try:
             context_weights = data['context_weights']
-            context_weights = array_type.asarray(context_weights,
-                                                 dtype=cp.float32)
+            context_weights = np.asarray(context_weights,
+                                         dtype=np.float32)
         except KeyError:
-            context_weights = array_type.zeros((len(weights), len(weights)))
+            context_weights = np.zeros((len(weights), len(weights)))
 
         try:
             alpha = data['alpha']
@@ -304,7 +275,7 @@ class RecursiveSom(RecursiveMixin, Som):
                  scaler=Scaler(),
                  lr_lambda=2.5,
                  infl_lambda=2.5):
-
+        """Organize your maps recursively."""
         super().__init__(map_dimensions,
                          data_dimensionality,
                          learning_rate,
@@ -345,14 +316,13 @@ class RecursiveSom(RecursiveMixin, Som):
             The updates to the weights and context weights, respectively.
 
         """
-        xp = cp.get_array_module(diff_x)
         diff_y = kwargs['diff_y']
         bmu = self._get_bmu(activations)
         influence = influences[bmu]
 
         # Update
-        x_update = xp.multiply(diff_x, influence)
-        y_update = xp.multiply(diff_y, influence)
+        x_update = np.multiply(diff_x, influence)
+        y_update = np.multiply(diff_y, influence)
 
         return x_update, y_update
 
@@ -371,7 +341,7 @@ class RecursiveNg(RecursiveMixin, Ng):
                  scaler=Scaler(),
                  lr_lambda=2.5,
                  infl_lambda=2.5):
-
+        """Organize your gas recursively."""
         super().__init__(num_neurons,
                          data_dimensionality,
                          learning_rate,
@@ -412,13 +382,12 @@ class RecursiveNg(RecursiveMixin, Ng):
             The updates to the weights and context weights, respectively.
 
         """
-        xp = cp.get_array_module(diff_x)
         diff_y = kwargs['diff_y']
         bmu = self._get_bmu(activations)
         influence = influences[bmu]
 
         # Update
-        x_update = xp.multiply(diff_x, influence)
-        y_update = xp.multiply(diff_y, influence)
+        x_update = np.multiply(diff_x, influence)
+        y_update = np.multiply(diff_y, influence)
 
         return x_update, y_update

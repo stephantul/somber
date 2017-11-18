@@ -1,13 +1,12 @@
 """Base class for SOM and Neural Gas."""
 import numpy as np
-import cupy as cp
 import logging
 import time
 import types
 import json
 
 from tqdm import tqdm
-from .components.utilities import resize, Scaler, shuffle
+from .components.utilities import Scaler, shuffle
 from .components.initializers import range_initialization
 from collections import Counter, defaultdict
 
@@ -73,7 +72,7 @@ class Base(object):
                  valfunc="min",
                  initializer=range_initialization,
                  scaler=Scaler()):
-
+        """Organize nothing."""
         self.num_neurons = np.int(num_neurons)
         self.data_dimensionality = data_dimensionality
         self.weights = np.zeros((num_neurons, data_dimensionality))
@@ -114,20 +113,48 @@ class Base(object):
             Whether to show a progressbar during training.
 
         """
-        xp = cp.get_array_module(X)
-        X = xp.asarray(X, dtype=xp.float32)
         self._check_input(X)
 
-        X = self.scaler.fit_transform(X)
+        constants, X = self._pre_train(X,
+                                       stop_param_updates,
+                                       num_epochs,
+                                       updates_epoch)
+
+        start = time.time()
+
+        for epoch in range(num_epochs):
+
+            logger.info("Epoch {0} of {1}".format(epoch, num_epochs))
+
+            self._epoch(X,
+                        epoch,
+                        batch_size,
+                        updates_epoch,
+                        constants,
+                        show_progressbar)
+
+        self.trained = True
+        if self.scaler is not None:
+            self.weights = self.scaler.inverse_transform(self.weights)
+
+        logger.info("Total train time: {0}".format(time.time() - start))
+
+    def _pre_train(self,
+                   X,
+                   stop_param_updates,
+                   num_epochs,
+                   updates_epoch):
+        """Set parameters and constants before training."""
+        X = np.asarray(X, dtype=np.float32)
+
+        if self.scaler is not None:
+            X = self.scaler.fit_transform(X)
 
         if self.initializer is not None:
             self.weights = self.initializer(X, self.weights)
 
         for v in self.params.values():
             v['value'] = v['orig']
-
-        self._ensure_weights(X)
-        start = time.time()
 
         # Calculate the total number of updates given early stopping.
         updates = {k: stop_param_updates.get(k, num_epochs) * updates_epoch
@@ -144,21 +171,7 @@ class Base(object):
         constants = {k: np.exp(-self.params[k]['factor']) / v
                      for k, v in single_steps.items()}
 
-        for epoch in range(num_epochs):
-
-            logger.info("Epoch {0} of {1}".format(epoch, num_epochs))
-
-            self._epoch(X,
-                        epoch,
-                        batch_size,
-                        updates_epoch,
-                        constants,
-                        show_progressbar)
-
-        self.trained = True
-        self.weights = self.scaler.inverse_transform(self.weights)
-
-        logger.info("Total train time: {0}".format(time.time() - start))
+        return constants, X
 
     def fit_predict(self,
                     X,
@@ -244,7 +257,9 @@ class Base(object):
             diff = X_len - (idx * batch_size)
             if diff and diff < batch_size:
                 x = x[:diff]
-                prev_activation = prev_activation[:diff]
+                # Prev_activation may be None
+                if prev_activation is not None:
+                    prev_activation = prev_activation[:diff]
 
             # If we hit an update step, perform an update.
             if idx % update_step == 0:
@@ -263,11 +278,6 @@ class Base(object):
         influence = self._calculate_influence(self.params['infl']['value'])
         return influence * self.params['lr']['value']
 
-    def _ensure_weights(self, X):
-        """Ensure the parameters live on the GPU/CPU when the data does."""
-        xp = cp.get_array_module(X)
-        self.weights = xp.asarray(self.weights, xp.float32)
-
     def _init_prev(self, x):
         """Initialize recurrent SOMs."""
         return None
@@ -283,16 +293,14 @@ class Base(object):
         This function will append zeros to the end of your data to ensure that
         all batches are even-sized. These are masked out during training.
         """
-        xp = cp.get_array_module(X)
-
         if shuffle_data:
             X = shuffle(X)
 
         if batch_size > X.shape[0]:
             batch_size = X.shape[0]
 
-        max_x = int(xp.ceil(X.shape[0] / batch_size))
-        X = resize(X, (max_x, batch_size, X.shape[-1]))
+        max_x = int(np.ceil(X.shape[0] / batch_size))
+        X = np.resize(X, (max_x, batch_size, X.shape[-1]))
 
         return X
 
@@ -352,11 +360,9 @@ class Base(object):
             A numpy array containing the updates to the neurons.
 
         """
-        xp = cp.get_array_module(diff_x)
-
         bmu = self._get_bmu(activations)
         influence = influences[bmu]
-        update = xp.multiply(diff_x, influence)
+        update = np.multiply(diff_x, influence)
         return update
 
     def distance_function(self, x, weights):
@@ -380,9 +386,8 @@ class Base(object):
             the difference between euch neuron and each input.
 
         """
-        xp = cp.get_array_module(x)
         diff = x[:, None, :] - weights[None, :, :]
-        activations = xp.linalg.norm(diff, axis=2)
+        activations = np.linalg.norm(diff, axis=2)
 
         return activations, diff
 
@@ -427,15 +432,16 @@ class Base(object):
         """
         self._check_input(X)
 
-        xp = cp.get_array_module()
         batched = self._create_batches(X, batch_size, shuffle_data=False)
 
         activations = []
+        prev = self._init_prev(batched)
 
         for x in tqdm(batched, disable=not show_progressbar):
-            activations.extend(self.forward(x)[0])
+            prev = self.forward(x, prev_activation=prev)[0]
+            activations.extend(prev)
 
-        activations = xp.asarray(activations, dtype=xp.float32)
+        activations = np.asarray(activations, dtype=np.float32)
         activations = activations[:X.shape[0]]
         return activations.reshape(X.shape[0], self.num_neurons)
 
@@ -461,11 +467,8 @@ class Base(object):
         """
         dist = self.transform(X, batch_size, show_progressbar)
         res = dist.__getattribute__(self.argfunc)(1)
-        xp = cp.get_array_module(res)
-        if xp == np:
-            return res
-        else:
-            return res.get()
+
+        return res
 
     def quantization_error(self, X, batch_size=1):
         """
@@ -489,11 +492,8 @@ class Base(object):
         """
         dist = self.transform(X, batch_size)
         res = dist.__getattribute__(self.valfunc)(1)
-        xp = cp.get_array_module(res)
-        if xp == np:
-            return res
-        else:
-            return res.get()
+
+        return res
 
     def receptive_field(self,
                         X,
@@ -515,7 +515,7 @@ class Base(object):
             Input data.
         identities : list
             A list of symbolic identities associated with each input.
-            We expect this list to be as long as the input data.
+            We enpect this list to be as long as the input data.
         max_len : int, optional, default 10
             The maximum length to attempt to find. Raising this increases
             memory use.
@@ -536,6 +536,8 @@ class Base(object):
 
         """
         receptive_fields = defaultdict(list)
+
+        predictions = self.predict(X)
 
         if len(predictions) != len(identities):
             raise ValueError("X and identities are not the same length: "
@@ -565,7 +567,7 @@ class Base(object):
         return rec
 
     @classmethod
-    def load(cls, path, array_type=np):
+    def load(cls, path):
         """
         Load a SOM from a JSON file saved with this package.
 
@@ -588,7 +590,7 @@ class Base(object):
         data = json.load(open(path))
 
         weights = data['weights']
-        weights = array_type.asarray(weights, dtype=array_type.float32)
+        weights = np.asarray(weights, dtype=np.float32)
 
         s = cls(data['num_neurons'],
                 data['data_dimensionality'],
@@ -609,7 +611,7 @@ class Base(object):
         to_save = {}
         for x in self.param_names:
             attr = self.__getattribute__(x)
-            if type(attr) == np.ndarray or type(attr) == cp.ndarray:
+            if type(attr) == np.ndarray:
                 attr = [[float(x) for x in row] for row in attr]
             elif isinstance(attr, types.FunctionType):
                 attr = attr.__name__

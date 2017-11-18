@@ -1,4 +1,2 @@
 tqdm==4.14.0
 numpy==1.13.0
-cupy.egg==info
-cupy==1.0.0.1

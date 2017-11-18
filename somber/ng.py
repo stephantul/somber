@@ -1,6 +1,5 @@
 """Neural gas."""
 import numpy as np
-import cupy as cp
 import json
 from .base import Base
 from .components.utilities import Scaler
@@ -46,7 +45,7 @@ class Ng(Base):
                  scaler=Scaler(),
                  lr_lambda=2.5,
                  infl_lambda=2.5):
-
+        """Organize your gas."""
         params = {'infl': {'value': influence,
                            'factor': infl_lambda,
                            'orig': influence},
@@ -64,11 +63,10 @@ class Ng(Base):
 
     def _get_bmu(self, activations):
         """Get indices of bmus, sorted by their distance from input."""
-        xp = cp.get_array_module(activations)
         # If the neural gas is a recursive neural gas, we need reverse argsort.
         if self.argfunc == 'argmax':
             activations = -activations
-        sort = xp.argsort(activations, 1)
+        sort = np.argsort(activations, 1)
         return sort.argsort()
 
     def _calculate_influence(self, influence_lambda):
@@ -76,7 +74,7 @@ class Ng(Base):
         return np.exp(-np.arange(self.num_neurons) / influence_lambda)[:, None]
 
     @classmethod
-    def load(cls, path, array_type=np):
+    def load(cls, path):
         """
         Load a Neural Gas from a JSON file saved with this package.
 
@@ -99,7 +97,7 @@ class Ng(Base):
         data = json.load(open(path))
 
         weights = data['weights']
-        weights = array_type.asarray(weights, dtype=array_type.float32)
+        weights = np.asarray(weights, dtype=np.float32)
 
         s = cls(data['num_neurons'],
                 data['data_dimensionality'],

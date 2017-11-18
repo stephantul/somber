@@ -1,5 +1,4 @@
 """Utility functions."""
-import cupy as cp
 import numpy as np
 
 
@@ -69,27 +68,6 @@ class Scaler(object):
 
 def shuffle(array):
     """Gpu/cpu-agnostic shuffle function."""
-    xp = cp.get_array_module(array)
     z = array.copy()
-    if xp == cp:
-        z = z.get()
-        np.random.shuffle(z)
-        return cp.array(z, dtype=array.dtype)
-    else:
-        np.random.shuffle(z)
-        return z
-
-
-def resize(X, new_shape):
-    """Resize your data like np.resize."""
-    xp = cp.get_array_module(X)
-
-    X = X.reshape(np.prod(X.shape[:-1]), X.shape[-1])
-
-    # Difference between actual and desired size
-    length_diff = np.prod(new_shape[:-1]) - X.shape[0]
-    z = xp.zeros((length_diff, X.shape[-1]))
-    # Pad input data with zeros
-    z = xp.concatenate([X, z])
-    # Reshape
-    return z.reshape(new_shape)
+    np.random.shuffle(z)
+    return z
