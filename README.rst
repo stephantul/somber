@@ -106,7 +106,7 @@ We will also demonstrate that the RecursiveSOM can generate sequences which are 
           ids.append(symbols[r])
           seq.append(identities[r])
 
-      return np.array(seq)[None, :, :], ids
+      return np.array(seq), ids
 
   # Transfer probabilities.
   # after an A, we have a 50% chance of B or C
