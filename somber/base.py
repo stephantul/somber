@@ -31,12 +31,10 @@ class Base(object):
         with which the value is multiplied in each update step.
     argfunc : str, optional, default "argmin"
         The name of the function which is used for calculating the index of
-        the BMU. This is necessary because we do not know in advance whether
-        we will be receiving cupy or numpy arrays.
+        the BMU.
     valfunc : str, optional, default "min"
         The name of the function which is used for calculating the value of the
-        BMU. This is necessary because we do not know in advance whether
-        we will be receiving cupy or numpy arrays.
+        BMU.
     initializer : function, optional, default range_initialization
         A function which takes in the input data and weight matrix and returns
         an initialized weight matrix. The initializers are defined in
@@ -83,10 +81,7 @@ class Base(object):
         self.scaler = scaler
         self.initializer = initializer
         self.params = params
-        if scaler is None:
-            self.scaler = Scaler()
-        else:
-            self.scaler = scaler
+        self.scaler = scaler
 
     def fit(self,
             X,
@@ -575,9 +570,6 @@ class Base(object):
     def load(cls, path):
         """
         Load a SOM from a JSON file saved with this package.
-
-        Note that it is necessary to specify which array library
-        (i.e. cupy or numpy) you are using.
 
         parameters
         ==========

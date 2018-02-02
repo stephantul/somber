@@ -41,7 +41,7 @@ class Som(Base):
         A function which takes in the input data and weight matrix and returns
         an initialized weight matrix. The initializers are defined in
         somber.components.initializers. Can be set to None.
-    scaler : initialized Scaler instance, optional default Scaler()
+    scaler : initialized Scaler instance, optional default None
         An initialized instance of Scaler() which is used to scale the data
         to have mean 0 and stdev 1.
     lr_lambda : float

@@ -6,14 +6,11 @@ class Scaler(object):
     """
     Scales data based on the mean and standard deviation.
 
-    Reimplemented because this needs to deal with both numpy and cupy
-    arrays.
-
     attributes
     ==========
-    mean : cupy or numpy array
+    mean : numpy array
         The columnwise mean of the data after scaling.
-    std : cupy or numpy array
+    std : numpy array
         The columnwise standard deviation of the data after scaling.
     is_fit : bool
         Indicates whether this scaler has been fit yet.
@@ -41,11 +38,11 @@ class Scaler(object):
 
         parameters
         ==========
-        X : cupy or numpy array
+        X : numpy array
 
         returns
         =======
-        scaled : cupy or numpy array
+        scaled : numpy array
             A scaled version of said array.
 
         """
@@ -54,6 +51,7 @@ class Scaler(object):
         self.mean = X.mean(0)
         self.std = X.std(0)
         self.is_fit = True
+        return self
 
     def transform(self, X):
         """Transform your data to zero mean unit variance."""
