@@ -78,9 +78,6 @@ class Ng(Base):
         """
         Load a Neural Gas from a JSON file saved with this package.
 
-        Note that it is necessary to specify which array library
-        (i.e. cupy or numpy) you are using.
-
         parameters
         ==========
         path : str

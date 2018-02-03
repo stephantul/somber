@@ -16,14 +16,14 @@ def range_initialization(X, weights):
 
     parameters
     ==========
-    X : numpy or cupy array
+    X : numpy array
         The input data. The data range is calculated over the last axis.
-    weights : numpy or cupy array
+    weights : numpy array
         The weights. These are not modified in the function.
 
     returns
     =======
-    new_weights : numpy or cupy array
+    new_weights : numpy array
         A new version of the weights, initialized to the data range specified
         by X.
 

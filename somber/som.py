@@ -31,12 +31,10 @@ class Som(Base):
         optimal for maps with more than 2 dimensions.
     argfunc : str, optional, default "argmin"
         The name of the function which is used for calculating the index of
-        the BMU. This is necessary because we do not know in advance whether
-        we will be receiving cupy or numpy arrays.
+        the BMU.
     valfunc : str, optional, default "min"
         The name of the function which is used for calculating the value of the
-        BMU. This is necessary because we do not know in advance whether
-        we will be receiving cupy or numpy arrays.
+        BMU.
     initializer : function, optional, default range_initialization
         A function which takes in the input data and weight matrix and returns
         an initialized weight matrix. The initializers are defined in
@@ -238,7 +236,7 @@ class Som(Base):
 
         parameters
         ==========
-        X : numpy array or cupy array
+        X : numpy array
             The input data.
 
         returns
@@ -399,17 +397,12 @@ class Som(Base):
     @classmethod
     def load(cls, path):
         """
-        Load a SOM from a JSON file saved with this package.
-
-        Note that it is necessary to specify which array library
-        (i.e. cupy or numpy) you are using.
+        Load a SOM from a JSON file saved with this package..
 
         parameters
         ==========
         path : str
             The path to the JSON file.
-        array_type : library (i.e. numpy or cupy), optional, default numpy
-            The array library to use.
 
         returns
         =======

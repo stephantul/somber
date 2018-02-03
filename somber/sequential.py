@@ -217,8 +217,6 @@ class RecursiveMixin(SequentialMixin):
         ==========
         path : str
             The path to the JSON file.
-        array_type : library (i.e. numpy or cupy), optional, default numpy
-            The array library to use.
 
         returns
         =======
