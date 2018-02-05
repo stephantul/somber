@@ -6,7 +6,7 @@ import types
 import json
 
 from tqdm import tqdm
-from .components.utilities import Scaler, shuffle
+from .components.utilities import shuffle
 from .components.initializers import range_initialization
 from collections import Counter, defaultdict
 
