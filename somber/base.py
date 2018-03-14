@@ -144,7 +144,7 @@ class Base(object):
 
     def _init_weights(self,
                       X):
-        """Set parameters and constants before training."""
+        """Set the weights and normalize data before starting training."""
         X = np.asarray(X, dtype=np.float32)
 
         if self.scaler is not None:
@@ -159,10 +159,10 @@ class Base(object):
         return X
 
     def _pre_train(self,
-                  stop_param_updates,
-                  num_epochs,
-                  updates_epoch):
-
+                   stop_param_updates,
+                   num_epochs,
+                   updates_epoch):
+        """Set parameters and constants before training."""
         # Calculate the total number of updates given early stopping.
         updates = {k: stop_param_updates.get(k, num_epochs) * updates_epoch
                    for k, v in self.params.items()}
