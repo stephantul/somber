@@ -89,7 +89,8 @@ class Base(object):
             updates_epoch=10,
             stop_param_updates=dict(),
             batch_size=1,
-            show_progressbar=False):
+            show_progressbar=False,
+            refit=True):
         """
         Fit the learner to some data.
 
@@ -114,14 +115,16 @@ class Base(object):
 
         """
         self._check_input(X)
+        if not self.trained or refit:
+            X = self._init_weights(X)
+        else:
+            if self.scaler is not None:
+                self.weights = self.scaler.transform(self.weights)
 
-        constants, X = self._pre_train(X,
-                                       stop_param_updates,
-                                       num_epochs,
-                                       updates_epoch)
-
+        constants = self._pre_train(stop_param_updates,
+                                    num_epochs,
+                                    updates_epoch)
         start = time.time()
-
         for epoch in range(num_epochs):
 
             logger.info("Epoch {0} of {1}".format(epoch, num_epochs))
@@ -136,14 +139,11 @@ class Base(object):
         self.trained = True
         if self.scaler is not None:
             self.weights = self.scaler.inverse_transform(self.weights)
-
+        print(self.params)
         logger.info("Total train time: {0}".format(time.time() - start))
 
-    def _pre_train(self,
-                   X,
-                   stop_param_updates,
-                   num_epochs,
-                   updates_epoch):
+    def _init_weights(self,
+                      X):
         """Set parameters and constants before training."""
         X = np.asarray(X, dtype=np.float32)
 
@@ -155,6 +155,13 @@ class Base(object):
 
         for v in self.params.values():
             v['value'] = v['orig']
+
+        return X
+
+    def _pre_train(self,
+                  stop_param_updates,
+                  num_epochs,
+                  updates_epoch):
 
         # Calculate the total number of updates given early stopping.
         updates = {k: stop_param_updates.get(k, num_epochs) * updates_epoch
@@ -171,7 +178,7 @@ class Base(object):
         constants = {k: np.exp(-self.params[k]['factor']) / v
                      for k, v in single_steps.items()}
 
-        return constants, X
+        return constants
 
     def fit_predict(self,
                     X,
@@ -230,10 +237,9 @@ class Base(object):
             The batch size
         updates_epoch : int
             The number of updates to perform per epoch
-        nb_constant : float
-            The number to multiply the neighborhood with at every update step.
-        lr_constant : float
-            The number to multiply the learning rate with at every update step.
+        constants : dict
+            A dictionary containing the constants with which to update the
+            parameters in self.parameters.
         show_progressbar : bool
             Whether to show a progressbar during training.
 
@@ -245,7 +251,7 @@ class Base(object):
         update_step = np.ceil(X_.shape[0] / updates_epoch)
 
         # Initialize the previous activation
-        prev_activation = self._init_prev(X_)
+        prev = self._init_prev(X_)
         influences = self._update_params(constants)
 
         # Iterate over the training data
@@ -258,17 +264,17 @@ class Base(object):
             if diff and diff < batch_size:
                 x = x[:diff]
                 # Prev_activation may be None
-                if prev_activation is not None:
-                    prev_activation = prev_activation[:diff]
+                if prev is not None:
+                    prev = prev[:diff]
 
             # If we hit an update step, perform an update.
             if idx % update_step == 0:
                 influences = self._update_params(constants)
                 logger.info(self.params)
 
-            prev_activation = self._propagate(x,
-                                              influences,
-                                              prev_activation=prev_activation)
+            prev = self._propagate(x,
+                                   influences,
+                                   prev_activation=prev)
 
     def _update_params(self, constants):
         """Update params and return new influence."""
