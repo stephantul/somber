@@ -139,7 +139,6 @@ class Base(object):
         self.trained = True
         if self.scaler is not None:
             self.weights = self.scaler.inverse_transform(self.weights)
-        print(self.params)
         logger.info("Total train time: {0}".format(time.time() - start))
 
     def _init_weights(self,
