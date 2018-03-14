@@ -6,8 +6,8 @@ class Scaler(object):
     """
     Scales data based on the mean and standard deviation.
 
-    attributes
-    ==========
+    Attributes
+    ----------
     mean : numpy array
         The columnwise mean of the data after scaling.
     std : numpy array
@@ -36,12 +36,12 @@ class Scaler(object):
         array.
         If the array has more than 2 dimensions, it is flattened.
 
-        parameters
-        ==========
+        Parameters
+        ----------
         X : numpy array
 
-        returns
-        =======
+        Returns
+        -------
         scaled : numpy array
             A scaled version of said array.
 

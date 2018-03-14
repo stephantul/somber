@@ -14,15 +14,15 @@ def range_initialization(X, weights):
     The data range is calculated by reshaping the input matrix to a
     2D matrix, and then taking the min and max values over the columns.
 
-    parameters
-    ==========
+    Parameters
+    ----------
     X : numpy array
         The input data. The data range is calculated over the last axis.
     weights : numpy array
         The weights. These are not modified in the function.
 
-    returns
-    =======
+    Returns
+    -------
     new_weights : numpy array
         A new version of the weights, initialized to the data range specified
         by X.

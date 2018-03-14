@@ -18,8 +18,8 @@ class Base(object):
     """
     This is a base class for the Neural gas and SOM.
 
-    parameters
-    ==========
+    Parameters
+    ----------
     num_neurons : int
         The number of neurons to create.
     data_dimensionality : int
@@ -44,8 +44,8 @@ class Base(object):
         to have mean 0 and stdev 1. If this is set to None, the SOM will
         create a scaler.
 
-    attributes
-    ==========
+    Attributes
+    ----------
     trained : bool
         Whether the som has been trained.
     weights : numpy array
@@ -93,8 +93,8 @@ class Base(object):
         """
         Fit the learner to some data.
 
-        parameters
-        ==========
+        Parameters
+        ----------
         X : numpy array.
             The input data.
         num_epochs : int, optional, default 10
@@ -220,8 +220,8 @@ class Base(object):
         This function shuffles the data internally,
         as this improves performance.
 
-        parameters
-        ==========
+        Parameters
+        ----------
         X : numpy array
             The training data.
         epoch_idx : int
@@ -325,13 +325,13 @@ class Base(object):
         SOMs, like the recurrent SOM need more complicated forward pass
         functions.
 
-        parameters
-        ==========
+        Parameters
+        ----------
         x : numpy array.
             The input vector.
 
-        returns
-        =======
+        Returns
+        -------
         matrices : tuple of matrices.
             A tuple containing the activations and differences between
             neurons and input, respectively.
@@ -343,8 +343,8 @@ class Base(object):
         """
         Backward pass through the network, including update.
 
-        parameters
-        ==========
+        Parameters
+        ----------
         diff_x : numpy array
             A matrix containing the differences between the input and neurons.
         influences : numpy array
@@ -354,8 +354,8 @@ class Base(object):
             The activations each neuron has to each data point. This is used
             to calculate the BMU.
 
-        returns
-        =======
+        Returns
+        -------
         update : numpy array
             A numpy array containing the updates to the neurons.
 
@@ -369,15 +369,15 @@ class Base(object):
         """
         Calculate euclidean distance between a batch of input data and weights.
 
-        parameters
-        ==========
+        Parameters
+        ----------
         X : numpy array.
             The input data.
         weights : numpy array.
             The weights
 
-        returns
-        =======
+        Returns
+        -------
         matrices : tuple of matrices
             The first matrix is a (batch_size * neurons) matrix of
             activation values, containing the response of each neuron
@@ -412,8 +412,8 @@ class Base(object):
         """
         Transform input to a distance matrix by measuring the L2 distance.
 
-        parameters
-        ==========
+        Parameters
+        ----------
         X : numpy array.
             The input data.
         batch_size : int, optional, default 100
@@ -422,8 +422,8 @@ class Base(object):
         show_progressbar : bool
             Whether to show a progressbar during transformation.
 
-        returns
-        =======
+        Returns
+        -------
         transformed : numpy array
             A matrix containing the distance from each datapoint to all
             neurons. The distance is normally expressed as euclidean distance,
@@ -449,8 +449,8 @@ class Base(object):
         """
         Predict the BMU for each input data.
 
-        parameters
-        ==========
+        Parameters
+        ----------
         X : numpy array.
             The input data.
         batch_size : int, optional, default 100
@@ -459,8 +459,8 @@ class Base(object):
         show_progressbar : bool
             Whether to show a progressbar during prediction.
 
-        returns
-        =======
+        Returns
+        -------
         predictions : numpy array
             An array containing the BMU for each input data point.
 
@@ -477,15 +477,15 @@ class Base(object):
         Find the the minimum euclidean distance between the units and
         some input.
 
-        parameters
-        ==========
+        Parameters
+        ----------
         X : numpy array.
             The input data.
         batch_size : int
             The batch size to use for processing.
 
-        returns
-        =======
+        Returns
+        -------
         error : numpy array
             The error for each data point.
 
@@ -509,8 +509,8 @@ class Base(object):
         specific sequences, it will have longer receptive fields, and therefore
         gives a better description of the dynamics of a given system.
 
-        parameters
-        ==========
+        Parameters
+        ----------
         X : numpy array
             Input data.
         identities : list
@@ -527,8 +527,8 @@ class Base(object):
         batch_size : int, optional, default 1
             The batch size to use in prediction
 
-        returns
-        =======
+        Returns
+        -------
         receptive_fields : dict
             A dictionary mapping from the neuron id to the found sequences
             for that neuron. The sequences are represented as lists of
@@ -571,13 +571,13 @@ class Base(object):
         """
         Load a SOM from a JSON file saved with this package.
 
-        parameters
-        ==========
+        Parameters
+        ----------
         path : str
             The path to the JSON file.
 
-        returns
-        =======
+        Returns
+        -------
         s : cls
             A som of the specified class.
 

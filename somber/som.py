@@ -15,8 +15,8 @@ class Som(Base):
     """
     This is a batched version of the basic SOM.
 
-    parameters
-    ==========
+    Parameters
+    ----------
     map_dimensions : tuple
         A tuple describing the map size. For example, (10, 10) will create
         a 10 * 10 map with 100 neurons, while a (10, 10, 10) map with 1000
@@ -36,7 +36,7 @@ class Som(Base):
         The name of the function which is used for calculating the value of the
         BMU.
     initializer : function, optional, default range_initialization
-        A function which takes in the input data and weight matrix and returns
+        A function which takes in the input data and weight matrix and Returns
         an initialized weight matrix. The initializers are defined in
         somber.components.initializers. Can be set to None.
     scaler : initialized Scaler instance, optional default None
@@ -49,8 +49,8 @@ class Som(Base):
         Controls the steepness of the exponential function that decreases
         the neighborhood.
 
-    attributes
-    ==========
+    Attributes
+    ----------
     trained : bool
         Whether the som has been trained.
     num_neurons : int
@@ -118,13 +118,13 @@ class Som(Base):
         The neighborhood has size num_neurons * num_neurons, so for a
         30 * 30 map, the neighborhood will be size (900, 900).
 
-        parameters
-        ==========
+        Parameters
+        ----------
         neighborhood : float
             The neighborhood value.
 
-        returns
-        =======
+        Returns
+        -------
         neighborhood : numpy array
             The influence from each neuron to each other neuron.
 
@@ -183,15 +183,15 @@ class Som(Base):
         Formally, the topographic error is the proportion of units for which
         the two most similar neurons are not direct neighbors on the map.
 
-        parameters
-        ==========
+        Parameters
+        ----------
         X : numpy array.
             The input data.
         batch_size : int
             The batch size to use when calculating the topographic error.
 
-        returns
-        =======
+        Returns
+        -------
         error : numpy array
             A vector of numbers, representing the topographic error
             for each data point.
@@ -234,13 +234,13 @@ class Som(Base):
         The average spread is a measure of how far each neuron is from the
         data points which cluster to it.
 
-        parameters
-        ==========
+        Parameters
+        ----------
         X : numpy array
             The input data.
 
-        returns
-        =======
+        Returns
+        -------
         spread : numpy array
             The average distance from each neuron to each data point.
 
@@ -272,8 +272,8 @@ class Som(Base):
         specific sequences, it will have longer receptive fields, and therefore
         gives a better description of the dynamics of a given system.
 
-        parameters
-        ==========
+        Parameters
+        ----------
         X : numpy array
             Input data.
         identities : list
@@ -290,8 +290,8 @@ class Som(Base):
         batch_size : int, optional, default 1
             The batch size to use in prediction
 
-        returns
-        =======
+        Returns
+        -------
         receptive_fields : dict
             A dictionary mapping from the neuron id to the found sequences
             for that neuron. The sequences are represented as lists of
@@ -337,16 +337,16 @@ class Som(Base):
 
         Works best for symbolic (instead of continuous) input data.
 
-        parameters
-        ==========
+        Parameters
+        ----------
         X : numpy array
             Input data
         identities : list
             A list of names for each of the input data. Must be the same
             length as X.
 
-        returns
-        =======
+        Returns
+        -------
         m : numpy array
             An array with the same shape as the map
 
@@ -376,8 +376,8 @@ class Som(Base):
         For one-dimensional SOMs, the returned array is of shape
         (W.shape[0], 1, W.shape[2])
 
-        returns
-        =======
+        Returns
+        -------
         w : numpy array
             A three-dimensional array containing the weights in a
             2D array for easy visualization.
@@ -399,13 +399,13 @@ class Som(Base):
         """
         Load a SOM from a JSON file saved with this package..
 
-        parameters
-        ==========
+        Parameters
+        ----------
         path : str
             The path to the JSON file.
 
-        returns
-        =======
+        Returns
+        -------
         s : cls
             A som of the specified class.
 

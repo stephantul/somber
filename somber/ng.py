@@ -10,8 +10,8 @@ class Ng(Base):
     """
     Neural gas.
 
-    parameters
-    ==========
+    Parameters
+    ----------
     num_neurons : int
         The number of neurons in the neural gas.
     data_dimensionality : int
@@ -78,13 +78,13 @@ class Ng(Base):
         """
         Load a Neural Gas from a JSON file saved with this package.
 
-        parameters
-        ==========
+        Parameters
+        ----------
         path : str
             The path to the JSON file.
 
-        returns
-        =======
+        Returns
+        -------
         s : cls
             A neural gas.
 

@@ -46,13 +46,7 @@ class SequentialMixin(object):
         raise ValueError("Base class.")
 
     def predict_distance(self, X, batch_size=1, show_progressbar=False):
-        """
-        Predict distances to some input data.
-
-        :param X: The input data.
-        :return: An array of arrays, representing the activation
-        each node has to each input.
-        """
+        """Predict distances to some input data."""
         self._check_input(X)
 
         X_shape = reduce(np.multiply, X.shape[:-1], 1)
@@ -96,8 +90,8 @@ class RecursiveMixin(SequentialMixin):
     "remember" short sequences, which makes it attractive for simple
     sequence problems, e.g. characters or words.
 
-    parameters
-    ==========
+    Parameters
+    ----------
     map_dimensions : tuple
         A tuple describing the map size. For example, (10, 10) will create
         a 10 * 10 map with 100 neurons, while a (10, 10, 10) map with 1000
@@ -111,7 +105,7 @@ class RecursiveMixin(SequentialMixin):
         calculated as max(map_dimensions) / 2. This value might not be
         optimal for maps with more than 2 dimensions.
     initializer : function, optional, default range_initialization
-        A function which takes in the input data and weight matrix and returns
+        A function which takes in the input data and weight matrix and Returns
         an initialized weight matrix. The initializers are defined in
         somber.components.initializers. Can be set to None.
     scaler : initialized Scaler instance, optional default None
@@ -124,8 +118,8 @@ class RecursiveMixin(SequentialMixin):
         Controls the steepness of the exponential function that decreases
         the neighborhood.
 
-    attributes
-    ==========
+    Attributes
+    ----------
     trained : bool
         Whether the som has been trained.
     num_neurons : int
@@ -177,15 +171,15 @@ class RecursiveMixin(SequentialMixin):
         The forward pass in recursive som is based on a combination between
         the activation in the last time-step and the current time-step.
 
-        parameters
-        ==========
+        Parameters
+        ----------
         x : numpy array
             The input data.
         prev_activation : numpy array.
             The activation of the network in the previous time-step.
 
-        returns
-        =======
+        Returns
+        -------
         activations : tuple of activations and differences
             A tuple containing the activation of each unit, the differences
             between the weights and input and the differences between the
@@ -213,13 +207,13 @@ class RecursiveMixin(SequentialMixin):
         You can use this function to load weights of other SOMs.
         If there are no context weights, they will be set to 0.
 
-        parameters
-        ==========
+        Parameters
+        ----------
         path : str
             The path to the JSON file.
 
-        returns
-        =======
+        Returns
+        -------
         s : cls
             A som of the specified class.
 
@@ -295,8 +289,8 @@ class RecursiveSom(RecursiveMixin, Som):
         """
         Backward pass through the network, including update.
 
-        parameters
-        ==========
+        Parameters
+        ----------
         diff_x : numpy array
             A matrix containing the differences between the input and neurons.
         influences : numpy array
@@ -308,8 +302,8 @@ class RecursiveSom(RecursiveMixin, Som):
         differency_y : numpy array
             The differences between the input and context neurons.
 
-        returns
-        =======
+        Returns
+        -------
         updates : tuple of arrays
             The updates to the weights and context weights, respectively.
 
@@ -361,8 +355,8 @@ class RecursiveNg(RecursiveMixin, Ng):
         """
         Backward pass through the network, including update.
 
-        parameters
-        ==========
+        Parameters
+        ----------
         diff_x : numpy array
             A matrix containing the differences between the input and neurons.
         influences : numpy array
@@ -374,8 +368,8 @@ class RecursiveNg(RecursiveMixin, Ng):
         differency_y : numpy array
             The differences between the input and context neurons.
 
-        returns
-        =======
+        Returns
+        -------
         updates : tuple of arrays
             The updates to the weights and context weights, respectively.
 
