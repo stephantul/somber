@@ -2,7 +2,7 @@
 import numpy as np
 import logging
 
-from .som import Som
+from .som import BaseSom
 from .components.initializers import range_initialization
 from tqdm import tqdm
 
@@ -10,7 +10,7 @@ from tqdm import tqdm
 logger = logging.getLogger(__name__)
 
 
-class PLSom(Som):
+class PLSom(BaseSom):
     """
     An implementation of the PLSom.
 
@@ -67,16 +67,14 @@ class PLSom(Som):
                  scaler=None):
         """Organize your maps parameterlessly."""
         super().__init__(map_dimensions,
-                         0,
+                         data_dimensionality=data_dimensionality,
+                         argfunc='argmin',
+                         valfunc='min',
+                         params={'r': {'value': 1,
+                                       'factor': 1,
+                                       'orig': 1}},
                          initializer=initializer,
                          scaler=scaler)
-
-        self.params = {'r': {'value': 1,
-                             'factor': 1,
-                             'orig': 1}}
-
-        # Initialize the distance grid: only needs to be done once.
-        self.distance_grid = self._initialize_distance_grid()
 
     def _epoch(self,
                X,

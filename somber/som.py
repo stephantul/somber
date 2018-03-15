@@ -11,9 +11,9 @@ from .base import Base
 logger = logging.getLogger(__name__)
 
 
-class Som(Base):
+class BaseSom(Base):
     """
-    This is a batched version of the basic SOM.
+    Base class of the classis SOM.
 
     Parameters
     ----------
@@ -21,91 +21,50 @@ class Som(Base):
         A tuple describing the map size. For example, (10, 10) will create
         a 10 * 10 map with 100 neurons, while a (10, 10, 10) map with 1000
         neurons creates a 10 * 10 * 10 map with 1000 neurons.
-    learning_rate : float
-        The starting learning rate h0.
-    data_dimensionality : int, default None
+    data_dimensionality : int
         The dimensionality of the input data.
-    neighborhood : float, optional, default None.
-        The starting neighborhood n0. If left at None, the value will be
-        calculated as max(map_dimensions) / 2. This value might not be
-        optimal for maps with more than 2 dimensions.
-    argfunc : str, optional, default "argmin"
+    params : dict
+        The dictionary of parameters to update. Each value of each entry in the
+        the dictionary is also a dictionary with three keys.
+    argfunc : str
         The name of the function which is used for calculating the index of
         the BMU.
-    valfunc : str, optional, default "min"
+    valfunc : str
         The name of the function which is used for calculating the value of the
         BMU.
-    initializer : function, optional, default range_initialization
+    initializer : function
         A function which takes in the input data and weight matrix and Returns
         an initialized weight matrix. The initializers are defined in
         somber.components.initializers. Can be set to None.
-    scaler : initialized Scaler instance, optional default None
+    scaler : initialized Scaler instance
         An initialized instance of Scaler() which is used to scale the data
         to have mean 0 and stdev 1.
-    lr_lambda : float
-        Controls the steepness of the exponential function that decreases
-        the learning rate.
-    nb_lambda : float
-        Controls the steepness of the exponential function that decreases
-        the neighborhood.
-
-    Attributes
-    ----------
-    trained : bool
-        Whether the som has been trained.
-    num_neurons : int
-        The dimensionality of the weight matrix, i.e. the number of
-        neurons on the map.
-    distance_grid : numpy array
-        An array which contains the distance from each neuron to each
-        other neuron.
 
     """
 
-    # Static property names
-    param_names = {'map_dimensions',
-                   'weights',
-                   'data_dimensionality',
-                   'params'}
-
     def __init__(self,
                  map_dimensions,
-                 learning_rate,
-                 data_dimensionality=None,
-                 influence=None,
-                 initializer=range_initialization,
-                 scaler=None,
-                 lr_lambda=2.5,
-                 infl_lambda=2.5):
-        """Organize your maps."""
-        if influence is None:
-            # Add small constant to sigma to prevent
-            # divide by zero for maps with the same max_dim as the number
-            # of dimensions.
-            influence = max(map_dimensions) / 2
-            influence += 0.0001
-
+                 data_dimensionality,
+                 params,
+                 argfunc,
+                 valfunc,
+                 initializer,
+                 scaler):
+        """Initialize your maps."""
         # A tuple of dimensions
         # Usually (width, height), but can accomodate N-dimensional maps.
         self.map_dimensions = map_dimensions
+        self.num_neurons = np.int(np.prod(self.map_dimensions))
+        # Initialize the distance grid: only needs to be done once.
+        self.distance_grid = self._initialize_distance_grid()
 
-        num_neurons = np.int(np.prod(map_dimensions))
-        params = {'infl': {'value': influence,
-                           'factor': infl_lambda,
-                           'orig': influence},
-                  'lr': {'value': learning_rate,
-                         'factor': lr_lambda,
-                         'orig': learning_rate}}
-
-        super().__init__(num_neurons,
+        super().__init__(self.num_neurons,
                          data_dimensionality,
                          params,
                          'argmin',
                          'min',
                          initializer,
                          scaler)
-        # Initialize the distance grid: only needs to be done once.
-        self.distance_grid = self._initialize_distance_grid()
 
     def _init_prev(self, x):
         """Initialize recurrent SOMs."""
@@ -393,6 +352,96 @@ class Som(Base):
         return self.weights.reshape((first_dim,
                                      second_dim,
                                      self.data_dimensionality))
+
+
+class Som(BaseSom):
+    """
+    This is a batched version of the basic SOM.
+
+    Parameters
+    ----------
+    map_dimensions : tuple
+        A tuple describing the map size. For example, (10, 10) will create
+        a 10 * 10 map with 100 neurons, while a (10, 10, 10) map with 1000
+        neurons creates a 10 * 10 * 10 map with 1000 neurons.
+    learning_rate : float
+        The starting learning rate h0.
+    data_dimensionality : int, default None
+        The dimensionality of the input data.
+    neighborhood : float, optional, default None.
+        The starting neighborhood n0. If left at None, the value will be
+        calculated as max(map_dimensions) / 2. This value might not be
+        optimal for maps with more than 2 dimensions.
+    argfunc : str, optional, default "argmin"
+        The name of the function which is used for calculating the index of
+        the BMU.
+    valfunc : str, optional, default "min"
+        The name of the function which is used for calculating the value of the
+        BMU.
+    initializer : function, optional, default range_initialization
+        A function which takes in the input data and weight matrix and Returns
+        an initialized weight matrix. The initializers are defined in
+        somber.components.initializers. Can be set to None.
+    scaler : initialized Scaler instance, optional default None
+        An initialized instance of Scaler() which is used to scale the data
+        to have mean 0 and stdev 1.
+    lr_lambda : float
+        Controls the steepness of the exponential function that decreases
+        the learning rate.
+    nb_lambda : float
+        Controls the steepness of the exponential function that decreases
+        the neighborhood.
+
+    Attributes
+    ----------
+    trained : bool
+        Whether the som has been trained.
+    num_neurons : int
+        The dimensionality of the weight matrix, i.e. the number of
+        neurons on the map.
+    distance_grid : numpy array
+        An array which contains the distance from each neuron to each
+        other neuron.
+
+    """
+
+    # Static property names
+    param_names = {'map_dimensions',
+                   'weights',
+                   'data_dimensionality',
+                   'params'}
+
+    def __init__(self,
+                 map_dimensions,
+                 learning_rate,
+                 data_dimensionality=None,
+                 influence=None,
+                 initializer=range_initialization,
+                 scaler=None,
+                 lr_lambda=2.5,
+                 infl_lambda=2.5):
+        """Organize your maps."""
+        if influence is None:
+            # Add small constant to sigma to prevent
+            # divide by zero for maps with the same max_dim as the number
+            # of dimensions.
+            influence = max(map_dimensions) / 2
+            influence += 0.0001
+
+        params = {'infl': {'value': influence,
+                           'factor': infl_lambda,
+                           'orig': influence},
+                  'lr': {'value': learning_rate,
+                         'factor': lr_lambda,
+                         'orig': learning_rate}}
+
+        super().__init__(map_dimensions,
+                         data_dimensionality,
+                         params,
+                         'argmin',
+                         'min',
+                         initializer,
+                         scaler)
 
     @classmethod
     def load(cls, path):

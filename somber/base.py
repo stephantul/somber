@@ -89,7 +89,7 @@ class Base(object):
     def fit(self,
             X,
             num_epochs=10,
-            updates_epoch=10,
+            updates_epoch=None,
             stop_param_updates=dict(),
             batch_size=1,
             show_progressbar=False,
@@ -127,6 +127,9 @@ class Base(object):
         else:
             if self.scaler is not None:
                 self.weights = self.scaler.transform(self.weights)
+
+        if updates_epoch is None:
+            updates_epoch = np.max([X.shape[0] / 10, len(X)])
 
         constants = self._pre_train(stop_param_updates,
                                     num_epochs,
