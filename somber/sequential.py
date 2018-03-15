@@ -269,8 +269,8 @@ class RecursiveSom(RecursiveMixin, Som):
                  infl_lambda=2.5):
         """Organize your maps recursively."""
         super().__init__(map_dimensions,
-                         data_dimensionality,
                          learning_rate,
+                         data_dimensionality,
                          influence,
                          initializer,
                          scaler,

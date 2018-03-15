@@ -11,6 +11,7 @@ The package currently contains implementations of:
   * Recursive Som (RecSOM) (`Voegtlin, 2002 <http://www.sciencedirect.com/science/article/pii/S0893608002000722>`_)
   * Neural Gas (NG) (`Martinetz & Schulten, 1991 <https://www.ks.uiuc.edu/Publications/Papers/PDF/MART91B/MART91B.pdf>`_)
   * Recursive Neural Gas (Voegtlin, 2002)
+  * Parameterless Som (`Berglund & Sitte, 2007 <https://arxiv.org/abs/0705.0199>`_)
 
 Because these various sequential SOMs rely on internal dynamics for convergence, i.e. they do not fixate on some external label like a regular Recurrent Neural Network, processing in a sequential SOM is currently strictly online. This means that every example is processed separately, and weight updates happen after every example. Research into the development of batching and/or multi-threading is currently underway.
 
@@ -60,7 +61,7 @@ The color dataset comes from this nice `blog <https://codesachin.wordpress.com/2
                  'darkgrey', 'mediumgrey', 'lightgrey']
 
   # initialize
-  s = Som((10, 10), data_dimensionality=3, learning_rate=0.3)
+  s = Som((10, 10), learning_rate=0.3)
 
   # train
   # 10 updates with 10 epochs = 100 updates to the parameters.
@@ -125,7 +126,6 @@ We will also demonstrate that the RecursiveSOM can generate sequences which are 
   # beta = contribution of recurrent part to activation.
   # higher alpha to beta ratio
   s = RecursiveSom((10, 10),
-                   data_dimensionality=3,
                    learning_rate=0.3,
                    alpha=1.2,
                    beta=.9)
