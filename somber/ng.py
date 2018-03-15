@@ -14,12 +14,12 @@ class Ng(Base):
     ----------
     num_neurons : int
         The number of neurons in the neural gas.
-    data_dimensionality : int
-        The dimensionality of your input data.
     learning_rate : float
         The starting learning rate.
-    influence : float
+    influence : float, default None
         The starting influence. Sane value is sqrt(num_neurons).
+    data_dimensionality : int, default None
+        The dimensionality of your input data.
     initializer : function, optional, default range_initialization
         A function which takes in the input data and weight matrix and returns
         an initialized weight matrix. The initializers are defined in
@@ -38,9 +38,9 @@ class Ng(Base):
 
     def __init__(self,
                  num_neurons,
-                 data_dimensionality,
                  learning_rate,
-                 influence,
+                 influence=None,
+                 data_dimensionality=None,
                  initializer=range_initialization,
                  scaler=Scaler(),
                  lr_lambda=2.5,
@@ -48,7 +48,7 @@ class Ng(Base):
         """Organize your gas."""
         params = {'infl': {'value': influence,
                            'factor': infl_lambda,
-                           'orig': influence},
+                           'orig': np.sqrt(num_neurons)},
                   'lr': {'value': learning_rate,
                          'factor': lr_lambda,
                          'orig': learning_rate}}

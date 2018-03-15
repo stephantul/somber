@@ -31,7 +31,7 @@ class PLSom(Som):
         A tuple describing the map size. For example, (10, 10) will create
         a 10 * 10 map with 100 neurons, while a (10, 10, 10) map with 1000
         neurons creates a 10 * 10 * 10 map with 1000 neurons.
-    data_dimensionality : int
+    data_dimensionality : int, default None
         The dimensionality of the input data.
     initializer : function, optional, default range_initialization
         A function which takes in the input data and weight matrix and Returns
@@ -62,13 +62,12 @@ class PLSom(Som):
 
     def __init__(self,
                  map_dimensions,
-                 data_dimensionality,
+                 data_dimensionality=None,
                  initializer=range_initialization,
                  scaler=None):
         """Organize your maps parameterlessly."""
         super().__init__(map_dimensions,
-                         data_dimensionality,
-                         learning_rate=0,
+                         0,
                          initializer=initializer,
                          scaler=scaler)
 

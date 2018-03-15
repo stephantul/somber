@@ -21,10 +21,10 @@ class Som(Base):
         A tuple describing the map size. For example, (10, 10) will create
         a 10 * 10 map with 100 neurons, while a (10, 10, 10) map with 1000
         neurons creates a 10 * 10 * 10 map with 1000 neurons.
-    data_dimensionality : int
-        The dimensionality of the input data.
     learning_rate : float
         The starting learning rate h0.
+    data_dimensionality : int, default None
+        The dimensionality of the input data.
     neighborhood : float, optional, default None.
         The starting neighborhood n0. If left at None, the value will be
         calculated as max(map_dimensions) / 2. This value might not be
@@ -70,8 +70,8 @@ class Som(Base):
 
     def __init__(self,
                  map_dimensions,
-                 data_dimensionality,
                  learning_rate,
+                 data_dimensionality=None,
                  influence=None,
                  initializer=range_initialization,
                  scaler=None,

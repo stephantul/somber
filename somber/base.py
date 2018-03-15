@@ -74,7 +74,10 @@ class Base(object):
         """Organize nothing."""
         self.num_neurons = np.int(num_neurons)
         self.data_dimensionality = data_dimensionality
-        self.weights = np.zeros((num_neurons, data_dimensionality))
+        if self.data_dimensionality:
+            self.weights = np.zeros((num_neurons, data_dimensionality))
+        else:
+            self.weights = None
         self.argfunc = argfunc
         self.valfunc = valfunc
         self.trained = False
@@ -114,6 +117,10 @@ class Base(object):
             Whether to show a progressbar during training.
 
         """
+        if self.data_dimensionality is None:
+            self.data_dimensionality = X.shape[-1]
+            self.weights = np.zeros((self.num_neurons,
+                                     self.data_dimensionality))
         self._check_input(X)
         if not self.trained or refit:
             X = self._init_weights(X)
@@ -150,7 +157,7 @@ class Base(object):
             X = self.scaler.fit_transform(X)
 
         if self.initializer is not None:
-            self.weights = self.initializer(X, self.weights)
+            self.weights = self.initializer(X, self.num_neurons)
 
         for v in self.params.values():
             v['value'] = v['orig']
