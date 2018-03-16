@@ -112,7 +112,7 @@ class PLSom(BaseSom):
 
         # Initialize the previous activation
         prev = self._init_prev(X_)
-        dist = self.distance_function(X_[0][None, :], self.weights)[0]
+        dist = self.distance_function(X_[0], self.weights)[0]
         influences = self._update_params(dist)
 
         # Iterate over the training data
