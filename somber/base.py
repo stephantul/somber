@@ -129,7 +129,9 @@ class Base(object):
                 self.weights = self.scaler.transform(self.weights)
 
         if updates_epoch is None:
-            updates_epoch = np.max([X.shape[0] / 10, len(X)])
+            X_len = X.shape[0]
+            updates_epoch = np.min([50, X_len // batch_size])
+            print(updates_epoch)
 
         constants = self._pre_train(stop_param_updates,
                                     num_epochs,
