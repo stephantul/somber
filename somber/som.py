@@ -88,7 +88,7 @@ class BaseSom(Base):
             The influence from each neuron to each other neuron.
 
         """
-        grid = np.exp(-(self.distance_grid) / (2 * (neighborhood ** 2)))
+        grid = np.exp(-self.distance_grid / (neighborhood ** 2))
         return grid.reshape(self.num_neurons, self.num_neurons)[:, :, None]
 
     def _initialize_distance_grid(self):
@@ -167,10 +167,10 @@ class BaseSom(Base):
         # Subtract 1.0 because 1.0 is the smallest distance.
         return np.sum(res > 1.0) / len(res)
 
-    def neighbors(self):
+    def neighbors(self, distance=2.0):
         """Get all neighbors for all neurons."""
         dgrid = self.distance_grid.reshape(self.num_neurons, self.num_neurons)
-        for x, y in zip(*np.nonzero(dgrid <= 2.0)):
+        for x, y in zip(*np.nonzero(dgrid <= distance)):
             if x != y:
                 yield x, y
 

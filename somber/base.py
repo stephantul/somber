@@ -93,6 +93,7 @@ class Base(object):
             stop_param_updates=dict(),
             batch_size=1,
             show_progressbar=False,
+            show_epoch=False,
             refit=True):
         """
         Fit the learner to some data.
@@ -115,6 +116,8 @@ class Base(object):
             performance dramatically, depending on the task.
         show_progressbar : bool, optional, default False
             Whether to show a progressbar during training.
+        show_epoch : bool, optional, default False
+            Whether to print the epoch number to stdout
 
         """
         if self.data_dimensionality is None:
@@ -131,14 +134,14 @@ class Base(object):
         if updates_epoch is None:
             X_len = X.shape[0]
             updates_epoch = np.min([50, X_len // batch_size])
-            print(updates_epoch)
 
         constants = self._pre_train(stop_param_updates,
                                     num_epochs,
                                     updates_epoch)
         start = time.time()
         for epoch in range(num_epochs):
-
+            if show_epoch:
+                print("Epoch {0} of {1}".format(epoch+1, num_epochs))
             logger.info("Epoch {0} of {1}".format(epoch, num_epochs))
 
             self._epoch(X,
@@ -214,14 +217,16 @@ class Base(object):
                       updates_epoch=10,
                       stop_param_updates=dict(),
                       batch_size=1,
-                      show_progressbar=False):
+                      show_progressbar=False,
+                      show_epoch=False):
         """First fit, then transform."""
         self.fit(X,
                  num_epochs,
                  updates_epoch,
                  stop_param_updates,
                  batch_size,
-                 show_progressbar)
+                 show_progressbar,
+                 show_epoch)
 
         return self.transform(X, batch_size=batch_size)
 
