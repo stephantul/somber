@@ -3,7 +3,9 @@
 
 from setuptools import setup
 from setuptools import find_packages
-
+from distutils.core import setup
+from Cython.Build import cythonize
+import numpy as np
 
 setup(name='somber',
       version='2.0.1',
@@ -18,4 +20,6 @@ setup(name='somber',
           'Intended Audience :: Developers',
           'Programming Language :: Python :: 3'],
       keywords='self-organizing maps machine learning unsupervised',
+      ext_modules=cythonize("somber/dist/dist.pyx"),
+      include_dirs=[np.get_include()],
       zip_safe=True)

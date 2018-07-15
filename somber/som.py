@@ -462,7 +462,7 @@ class Som(BaseSom):
         data = json.load(open(path))
 
         weights = data['weights']
-        weights = np.asarray(weights, dtype=np.float32)
+        weights = np.asarray(weights, dtype=np.float64)
 
         s = cls(data['map_dimensions'],
                 data['data_dimensionality'],
