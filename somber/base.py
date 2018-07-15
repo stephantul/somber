@@ -8,6 +8,7 @@ import json
 from tqdm import tqdm
 from .components.utilities import shuffle
 from .components.initializers import range_initialization
+from .dist import euclidean
 from collections import Counter, defaultdict
 
 
@@ -159,7 +160,7 @@ class Base(object):
     def _init_weights(self,
                       X):
         """Set the weights and normalize data before starting training."""
-        X = np.asarray(X, dtype=np.float32)
+        X = np.asarray(X, dtype=np.float64)
 
         if self.scaler is not None:
             X = self.scaler.fit_transform(X)
@@ -393,7 +394,7 @@ class Base(object):
 
         Parameters
         ----------
-        X : numpy array.
+        x : numpy array.
             The input data.
         weights : numpy array.
             The weights
@@ -408,10 +409,7 @@ class Base(object):
             the difference between euch neuron and each input.
 
         """
-        diff = x[:, None, :] - weights[None, :, :]
-        activations = np.linalg.norm(diff, axis=2)
-
-        return activations, diff
+        return euclidean(x, weights)
 
     def _check_input(self, X):
         """
@@ -463,7 +461,7 @@ class Base(object):
             prev = self.forward(x, prev_activation=prev)[0]
             activations.extend(prev)
 
-        activations = np.asarray(activations, dtype=np.float32)
+        activations = np.asarray(activations, dtype=np.float64)
         activations = activations[:X.shape[0]]
         return activations.reshape(X.shape[0], self.num_neurons)
 
@@ -607,7 +605,7 @@ class Base(object):
         data = json.load(open(path))
 
         weights = data['weights']
-        weights = np.asarray(weights, dtype=np.float32)
+        weights = np.asarray(weights, dtype=np.float64)
 
         s = cls(data['num_neurons'],
                 data['data_dimensionality'],

@@ -61,7 +61,7 @@ class SequentialMixin(object):
             activation = self.forward(x, prev_activation=activation)[0]
             activations.append(activation)
 
-        act = np.asarray(activations, dtype=np.float32).transpose((1, 0, 2))
+        act = np.asarray(activations, dtype=np.float64).transpose((1, 0, 2))
         act = act[:X_shape]
         return act.reshape(X_shape, self.num_neurons)
 
@@ -221,12 +221,12 @@ class RecursiveMixin(SequentialMixin):
         data = json.load(open(path))
 
         weights = data['weights']
-        weights = np.asarray(weights, dtype=np.float32)
+        weights = np.asarray(weights, dtype=np.float64)
 
         try:
             context_weights = data['context_weights']
             context_weights = np.asarray(context_weights,
-                                         dtype=np.float32)
+                                         dtype=np.float64)
         except KeyError:
             context_weights = np.zeros((len(weights), len(weights)))
 
@@ -283,7 +283,7 @@ class RecursiveSom(RecursiveMixin, Som):
         self.valfunc = 'max'
 
         self.context_weights = np.zeros((self.num_neurons, self.num_neurons),
-                                        dtype=np.float32)
+                                        dtype=np.float64)
 
     def backward(self, diff_x, influences, activations, **kwargs):
         """
@@ -349,7 +349,7 @@ class RecursiveNg(RecursiveMixin, Ng):
         self.valfunc = 'max'
 
         self.context_weights = np.zeros((self.num_neurons, self.num_neurons),
-                                        dtype=np.float32)
+                                        dtype=np.float64)
 
     def backward(self, diff_x, influences, activations, **kwargs):
         """
