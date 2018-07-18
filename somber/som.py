@@ -388,7 +388,7 @@ class Som(BaseSom):
     lr_lambda : float
         Controls the steepness of the exponential function that decreases
         the learning rate.
-    nb_lambda : float
+    infl_lambda : float
         Controls the steepness of the exponential function that decreases
         the neighborhood.
 
