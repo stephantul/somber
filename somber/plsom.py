@@ -63,6 +63,7 @@ class PLSom(BaseSom):
     def __init__(self,
                  map_dimensions,
                  data_dimensionality=None,
+                 beta=None,
                  initializer=range_initialization,
                  scaler=None):
         """Organize your maps parameterlessly."""
@@ -70,11 +71,12 @@ class PLSom(BaseSom):
                          data_dimensionality=data_dimensionality,
                          argfunc='argmin',
                          valfunc='min',
-                         params={'r': {'value': 1,
+                         params={'r': {'value': 0,
                                        'factor': 1,
-                                       'orig': 1}},
+                                       'orig': 0}},
                          initializer=initializer,
                          scaler=scaler)
+        self.beta = beta if beta else 2
 
     def _epoch(self,
                X,
@@ -112,8 +114,8 @@ class PLSom(BaseSom):
 
         # Initialize the previous activation
         prev = self._init_prev(X_)
-        dist = self.distance_function(X_[0], self.weights)[0]
-        influences = self._update_params(dist)
+        prev = self.distance_function(X_[0], self.weights)[0]
+        influences = self._update_params(prev)
 
         # Iterate over the training data
         for idx, x in enumerate(tqdm(X_, disable=not show_progressbar)):
@@ -128,10 +130,8 @@ class PLSom(BaseSom):
                 if prev is not None:
                     prev = prev[:diff]
 
-            if idx > 0 and idx % updates_epoch == 0:
-                influences = self._update_params(prev)
-                logger.info(self.params)
-
+            # if idx > 0 and idx % update_step == 0:
+            influences = self._update_params(prev)
             prev = self._propagate(x,
                                    influences,
                                    prev_activation=prev)
@@ -141,11 +141,10 @@ class PLSom(BaseSom):
         constants = np.max(np.min(constants, 1))
         self.params['r']['value'] = max([self.params['r']['value'],
                                          constants])
-
-        influence = self._calculate_influence(constants /
-                                              self.params['r']['value'])
-
-        return influence
+        epsilon = constants / self.params['r']['value']
+        influence = self._calculate_influence(epsilon)
+        # Account for learning rate
+        return influence * epsilon
 
     def _calculate_influence(self, neighborhood):
         """
@@ -165,6 +164,6 @@ class PLSom(BaseSom):
             The influence from each neuron to each other neuron.
 
         """
-        grid = np.exp(-(self.distance_grid) / (neighborhood ** 2))
-        grid *= neighborhood
+        n = (self.beta - 1) * np.log(1 + neighborhood*(np.e-1)) + 1
+        grid = np.exp((-self.distance_grid) / n**2)
         return grid.reshape(self.num_neurons, self.num_neurons)[:, :, None]
