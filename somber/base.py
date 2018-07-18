@@ -125,7 +125,7 @@ class Base(object):
             self.data_dimensionality = X.shape[-1]
             self.weights = np.zeros((self.num_neurons,
                                      self.data_dimensionality))
-        self._check_input(X)
+        X = self._check_input(X)
         if not self.trained or refit:
             X = self._init_weights(X)
         else:
@@ -419,6 +419,9 @@ class Base(object):
         the second dimension of this matrix has the same dimensionality as
         the weight matrix.
         """
+        if np.ndim(X) == 1:
+            X = np.reshape(X, (1, -1))
+
         if X.ndim != 2:
             raise ValueError("Your data is not a 2D matrix. "
                              "Actual size: {0}".format(X.shape))
@@ -427,6 +430,7 @@ class Base(object):
             raise ValueError("Your data size != weight dim: {0}, "
                              "expected {1}".format(X.shape[1],
                                                    self.data_dimensionality))
+        return X
 
     def transform(self, X, batch_size=100, show_progressbar=False):
         """
@@ -450,7 +454,7 @@ class Base(object):
             but can be any arbitrary metric.
 
         """
-        self._check_input(X)
+        X = self._check_input(X)
 
         batched = self._create_batches(X, batch_size, shuffle_data=False)
 

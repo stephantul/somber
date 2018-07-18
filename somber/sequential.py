@@ -47,7 +47,7 @@ class SequentialMixin(object):
 
     def predict_distance(self, X, batch_size=1, show_progressbar=False):
         """Predict distances to some input data."""
-        self._check_input(X)
+        X = self._check_input(X)
 
         X_shape = reduce(np.multiply, X.shape[:-1], 1)
 
