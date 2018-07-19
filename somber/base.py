@@ -8,7 +8,7 @@ import json
 from tqdm import tqdm
 from .components.utilities import shuffle
 from .components.initializers import range_initialization
-from .dist import euclidean
+from .distance import euclidean
 from collections import Counter, defaultdict
 
 
