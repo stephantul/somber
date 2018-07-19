@@ -66,6 +66,4 @@ class Scaler(object):
 
 def shuffle(array):
     """Gpu/cpu-agnostic shuffle function."""
-    z = array.copy()
-    np.random.shuffle(z)
-    return z
+    return np.random.permutation(array)
