@@ -465,8 +465,8 @@ class Som(BaseSom):
         weights = np.asarray(weights, dtype=np.float64)
 
         s = cls(data['map_dimensions'],
-                data['data_dimensionality'],
                 data['params']['lr']['orig'],
+                data['data_dimensionality'],
                 influence=data['params']['infl']['orig'],
                 lr_lambda=data['params']['lr']['factor'],
                 infl_lambda=data['params']['infl']['factor'])
