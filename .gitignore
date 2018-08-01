@@ -95,3 +95,4 @@ ENV/
 
 .remote-sync.json
 *.json
+test.py
