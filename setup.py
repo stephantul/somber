@@ -6,7 +6,7 @@ from Cython.Build import cythonize
 import numpy as np
 
 setup(name='somber',
-      version='2.0.1',
+      version='2.0.2',
       description='Self-Organizing Maps in Numpy',
       author='Stéphan Tulkens',
       author_email='stephan.tulkens@uantwerpen.be',
