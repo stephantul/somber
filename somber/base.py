@@ -6,7 +6,7 @@ import types
 import json
 
 from tqdm import tqdm
-from .components.utilities import shuffle
+from .components.utilities import shuffle, Scaler
 from .components.initializers import range_initialization
 from .distance import euclidean
 from collections import Counter, defaultdict
@@ -82,7 +82,8 @@ class Base(object):
         self.argfunc = argfunc
         self.valfunc = valfunc
         self.trained = False
-        self.scaler = scaler
+        if scaler is None:
+            self.scaler = Scaler()
         self.initializer = initializer
         self.params = params
         self.scaler = scaler
