@@ -141,9 +141,7 @@ class Base(object):
                                     num_epochs,
                                     updates_epoch)
         start = time.time()
-        for epoch in range(num_epochs):
-            if show_epoch:
-                print("Epoch {0} of {1}".format(epoch+1, num_epochs))
+        for epoch in tqdm(range(num_epochs), disable=not show_epoch):
             logger.info("Epoch {0} of {1}".format(epoch+1, num_epochs))
 
             self._epoch(X,
