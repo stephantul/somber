@@ -16,15 +16,15 @@ def euclidean(np.ndarray[DTYPE_F_t, ndim=2] data,
 
     Parameters
     ----------
-    a : np.ndarray - int64 - dim 2
+    data : np.ndarray - float64 - dim 2
         The first array, dim (M * N)
-    b : np.ndarray - int64 - dim 2
+    nodes : np.ndarray - float64 - dim 2
         The second array, dim (P * N)
 
     Returns
     -------
-    dot product : np.ndarray - float64 - dim2
-        The cosine distance  product between each vector in a and each
+    euclidean distance : np.ndarray - float64 - dim2
+        The euclidean distance between each vector in a and each
         vector in b, dim (M * P)
 
     """
