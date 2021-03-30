@@ -100,7 +100,6 @@ class Base(object):
         stop_param_updates=dict(),
         batch_size=1,
         show_progressbar=False,
-        show_epoch=False,
         refit=True,
     ):
         """
@@ -124,8 +123,6 @@ class Base(object):
             performance dramatically, depending on the task.
         show_progressbar : bool, optional, default False
             Whether to show a progressbar during training.
-        show_epoch : bool, optional, default False
-            Whether to print the epoch number to stdout
 
         """
         if self.data_dimensionality is None:
@@ -144,13 +141,16 @@ class Base(object):
 
         constants = self._pre_train(stop_param_updates, num_epochs, updates_epoch)
         start = time.time()
-        for epoch in tqdm(range(num_epochs), disable=not show_epoch):
+
+        progressbar = tqdm(total=len(X) * num_epochs) if show_progressbar else None
+
+        for epoch in range(num_epochs):
             logger.info("Epoch {0} of {1}".format(epoch + 1, num_epochs))
 
-            self._epoch(
-                X, epoch, batch_size, updates_epoch, constants, show_progressbar
-            )
+            self._epoch(X, epoch, batch_size, updates_epoch, constants, progressbar)
 
+        if progressbar is not None:
+            progressbar.close()
         self.trained = True
         if self.scaler is not None:
             self.weights = self.scaler.inverse_transform(self.weights)
@@ -238,9 +238,7 @@ class Base(object):
 
         return self.transform(X, batch_size=batch_size)
 
-    def _epoch(
-        self, X, epoch_idx, batch_size, updates_epoch, constants, show_progressbar
-    ):
+    def _epoch(self, X, epoch_idx, batch_size, updates_epoch, constants, progressbar):
         """
         Run a single epoch.
 
@@ -260,8 +258,8 @@ class Base(object):
         constants : dict
             A dictionary containing the constants with which to update the
             parameters in self.parameters.
-        show_progressbar : bool
-            Whether to show a progressbar during training.
+        progressbar : optional tqdm instance.
+            The progressbar instance to show and update during training
 
         """
         # Create batches
@@ -275,7 +273,7 @@ class Base(object):
         influences = self._update_params(constants)
 
         # Iterate over the training data
-        for idx, x in enumerate(tqdm(X_, disable=not show_progressbar)):
+        for idx, x in enumerate(X_):
 
             # Our batches are padded, so we need to
             # make sure we know when we hit the padding
@@ -293,6 +291,8 @@ class Base(object):
                 logger.info(self.params)
 
             prev = self._propagate(x, influences, prev_activation=prev)
+            if progressbar is not None:
+                progressbar.update(batch_size)
 
     def _update_params(self, constants):
         """Update params and return new influence."""

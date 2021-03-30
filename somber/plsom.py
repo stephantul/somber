@@ -4,7 +4,6 @@ import logging
 
 from .som import BaseSom
 from .components.initializers import range_initialization
-from tqdm import tqdm
 
 
 logger = logging.getLogger(__name__)
@@ -19,7 +18,7 @@ class PLSom(BaseSom):
     in an online fashion by continuously monitoring the error of each presented
     item.
 
-    In general, the PLSom is both less prone to catastrophic interference, or
+    In general, the PLSom is less prone to catastrophic interference, or
     "forgetting" than the original SOM. Simultaneously, it is also more suited
     to re-adapting to changes in distribution. This is because the SOM loses
     its plasticity according to an exponentially decreasing learning rate and
@@ -77,9 +76,7 @@ class PLSom(BaseSom):
         )
         self.beta = beta if beta else 2
 
-    def _epoch(
-        self, X, epoch_idx, batch_size, updates_epoch, constants, show_progressbar
-    ):
+    def _epoch(self, X, epoch_idx, batch_size, updates_epoch, constants, progressbar):
         """
         Run a single epoch.
 
@@ -99,8 +96,8 @@ class PLSom(BaseSom):
         constants : dict
             A dictionary containing the constants with which to update the
             parameters in self.parameters.
-        show_progressbar : bool
-            Whether to show a progressbar during training.
+        progressbar : optional tqdm instance.
+            The progressbar instance to show and update during training
 
         """
         # Create batches
@@ -113,7 +110,7 @@ class PLSom(BaseSom):
         influences = self._update_params(prev)
 
         # Iterate over the training data
-        for idx, x in enumerate(tqdm(X_, disable=not show_progressbar)):
+        for idx, x in enumerate(X_):
 
             # Our batches are padded, so we need to
             # make sure we know when we hit the padding
@@ -128,6 +125,8 @@ class PLSom(BaseSom):
             # if idx > 0 and idx % update_step == 0:
             influences = self._update_params(prev)
             prev = self._propagate(x, influences, prev_activation=prev)
+            if progressbar is not None:
+                progressbar.update(batch_size)
 
     def _update_params(self, constants):
         """Update the params."""

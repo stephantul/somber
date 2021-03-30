@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 
 class BaseSom(Base):
     """
-    Base class of the classis SOM.
+    Base class of the classic SOM.
 
     Parameters
     ----------
@@ -96,7 +96,7 @@ class BaseSom(Base):
         return grid.reshape(self.num_neurons, self.num_neurons)[:, :, None]
 
     def _initialize_distance_grid(self):
-        """Initialize the distance grid by calls to _grid_dist."""
+        """Initialize the distance grid by calls to _grid_distance."""
         p = [self._grid_distance(i) for i in range(self.num_neurons)]
         return np.array(p)
 
@@ -264,7 +264,7 @@ class BaseSom(Base):
                 "{0} and {1}".format(len(X), len(identities))
             )
 
-        for idx, p in enumerate(predictions.tolist()):
+        for idx, p in enumerate(predictions):
             receptive_fields[p].append(identities[idx + 1 - max_len : idx + 1])
 
         rec = {}
