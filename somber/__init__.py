@@ -4,9 +4,4 @@ from .plsom import PLSom
 from .ng import Ng
 from .sequential import RecursiveSom, RecursiveNg
 
-__all__ = ['Som',
-           'Ng',
-           'RecursiveSom',
-           'RecursiveNg',
-           'PLSom',
-           'MiikkulainenSom']
+__all__ = ["Som", "Ng", "RecursiveSom", "RecursiveNg", "PLSom"]

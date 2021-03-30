@@ -55,36 +55,31 @@ class PLSom(BaseSom):
     """
 
     # Static property names
-    param_names = {'map_dimensions',
-                   'weights',
-                   'data_dimensionality',
-                   'params'}
+    param_names = {"map_dimensions", "weights", "data_dimensionality", "params"}
 
-    def __init__(self,
-                 map_dimensions,
-                 data_dimensionality=None,
-                 beta=None,
-                 initializer=range_initialization,
-                 scaler=None):
+    def __init__(
+        self,
+        map_dimensions,
+        data_dimensionality=None,
+        beta=None,
+        initializer=range_initialization,
+        scaler=None,
+    ):
         """Organize your maps parameterlessly."""
-        super().__init__(map_dimensions,
-                         data_dimensionality=data_dimensionality,
-                         argfunc='argmin',
-                         valfunc='min',
-                         params={'r': {'value': 0,
-                                       'factor': 1,
-                                       'orig': 0}},
-                         initializer=initializer,
-                         scaler=scaler)
+        super().__init__(
+            map_dimensions,
+            data_dimensionality=data_dimensionality,
+            argfunc="argmin",
+            valfunc="min",
+            params={"r": {"value": 0, "factor": 1, "orig": 0}},
+            initializer=initializer,
+            scaler=scaler,
+        )
         self.beta = beta if beta else 2
 
-    def _epoch(self,
-               X,
-               epoch_idx,
-               batch_size,
-               updates_epoch,
-               constants,
-               show_progressbar):
+    def _epoch(
+        self, X, epoch_idx, batch_size, updates_epoch, constants, show_progressbar
+    ):
         """
         Run a single epoch.
 
@@ -132,16 +127,13 @@ class PLSom(BaseSom):
 
             # if idx > 0 and idx % update_step == 0:
             influences = self._update_params(prev)
-            prev = self._propagate(x,
-                                   influences,
-                                   prev_activation=prev)
+            prev = self._propagate(x, influences, prev_activation=prev)
 
     def _update_params(self, constants):
         """Update the params."""
         constants = np.max(np.min(constants, 1))
-        self.params['r']['value'] = max([self.params['r']['value'],
-                                         constants])
-        epsilon = constants / self.params['r']['value']
+        self.params["r"]["value"] = max([self.params["r"]["value"], constants])
+        epsilon = constants / self.params["r"]["value"]
         influence = self._calculate_influence(epsilon)
         # Account for learning rate
         return influence * epsilon
@@ -164,6 +156,6 @@ class PLSom(BaseSom):
             The influence from each neuron to each other neuron.
 
         """
-        n = (self.beta - 1) * np.log(1 + neighborhood*(np.e-1)) + 1
-        grid = np.exp((-self.distance_grid) / n**2)
+        n = (self.beta - 1) * np.log(1 + neighborhood * (np.e - 1)) + 1
+        grid = np.exp((-self.distance_grid) / n ** 2)
         return grid.reshape(self.num_neurons, self.num_neurons)[:, :, None]

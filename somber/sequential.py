@@ -133,24 +133,25 @@ class RecursiveMixin(SequentialMixin):
 
     """
 
-    param_names = {'data_dimensionality',
-                   'params',
-                   'map_dimensions',
-                   'valfunc',
-                   'argfunc',
-                   'weights',
-                   'context_weights',
-                   'alpha',
-                   'beta'}
+    param_names = {
+        "data_dimensionality",
+        "params",
+        "map_dimensions",
+        "valfunc",
+        "argfunc",
+        "weights",
+        "context_weights",
+        "alpha",
+        "beta",
+    }
 
     def _propagate(self, x, influences, **kwargs):
-        prev = kwargs['prev_activation']
+        prev = kwargs["prev_activation"]
 
         activation, diff_x, diff_y = self.forward(x, prev_activation=prev)
-        x_update, y_update = self.backward(diff_x,
-                                           influences,
-                                           activation,
-                                           diff_y=diff_y)
+        x_update, y_update = self.backward(
+            diff_x, influences, activation, diff_y=diff_y
+        )
         # If batch size is 1 we can leave out the call to mean.
         if x_update.shape[0] == 1:
             self.weights += x_update[0]
@@ -186,7 +187,7 @@ class RecursiveMixin(SequentialMixin):
             context input and context weights.
 
         """
-        prev = kwargs['prev_activation']
+        prev = kwargs["prev_activation"]
 
         # Differences is the components of the weights subtracted from
         # the weight vector.
@@ -220,31 +221,32 @@ class RecursiveMixin(SequentialMixin):
         """
         data = json.load(open(path))
 
-        weights = data['weights']
+        weights = data["weights"]
         weights = np.asarray(weights, dtype=np.float64)
 
         try:
-            context_weights = data['context_weights']
-            context_weights = np.asarray(context_weights,
-                                         dtype=np.float64)
+            context_weights = data["context_weights"]
+            context_weights = np.asarray(context_weights, dtype=np.float64)
         except KeyError:
             context_weights = np.zeros((len(weights), len(weights)))
 
         try:
-            alpha = data['alpha']
-            beta = data['beta']
+            alpha = data["alpha"]
+            beta = data["beta"]
         except KeyError:
             alpha = 1.0
             beta = 1.0
 
-        s = cls(data['map_dimensions'],
-                data['data_dimensionality'],
-                data['params']['lr']['orig'],
-                influence=data['params']['infl']['orig'],
-                alpha=alpha,
-                beta=beta,
-                lr_lambda=data['params']['lr']['factor'],
-                infl_lambda=data['params']['infl']['factor'])
+        s = cls(
+            data["map_dimensions"],
+            data["data_dimensionality"],
+            data["params"]["lr"]["orig"],
+            influence=data["params"]["infl"]["orig"],
+            alpha=alpha,
+            beta=beta,
+            lr_lambda=data["params"]["lr"]["factor"],
+            infl_lambda=data["params"]["infl"]["factor"],
+        )
 
         s.weights = weights
         s.context_weights = context_weights
@@ -256,34 +258,39 @@ class RecursiveMixin(SequentialMixin):
 class RecursiveSom(RecursiveMixin, Som):
     """Recursive version of the SOM."""
 
-    def __init__(self,
-                 map_dimensions,
-                 learning_rate,
-                 alpha,
-                 beta,
-                 data_dimensionality=None,
-                 influence=None,
-                 initializer=range_initialization,
-                 scaler=None,
-                 lr_lambda=2.5,
-                 infl_lambda=2.5):
+    def __init__(
+        self,
+        map_dimensions,
+        learning_rate,
+        alpha,
+        beta,
+        data_dimensionality=None,
+        influence=None,
+        initializer=range_initialization,
+        scaler=None,
+        lr_lambda=2.5,
+        infl_lambda=2.5,
+    ):
         """Organize your maps recursively."""
-        super().__init__(map_dimensions,
-                         learning_rate,
-                         data_dimensionality,
-                         influence,
-                         initializer,
-                         scaler,
-                         lr_lambda,
-                         infl_lambda)
+        super().__init__(
+            map_dimensions,
+            learning_rate,
+            data_dimensionality,
+            influence,
+            initializer,
+            scaler,
+            lr_lambda,
+            infl_lambda,
+        )
 
         self.alpha = alpha
         self.beta = beta
-        self.argfunc = 'argmax'
-        self.valfunc = 'max'
+        self.argfunc = "argmax"
+        self.valfunc = "max"
 
-        self.context_weights = np.zeros((self.num_neurons, self.num_neurons),
-                                        dtype=np.float64)
+        self.context_weights = np.zeros(
+            (self.num_neurons, self.num_neurons), dtype=np.float64
+        )
 
     def backward(self, diff_x, influences, activations, **kwargs):
         """
@@ -308,7 +315,7 @@ class RecursiveSom(RecursiveMixin, Som):
             The updates to the weights and context weights, respectively.
 
         """
-        diff_y = kwargs['diff_y']
+        diff_y = kwargs["diff_y"]
         bmu = self._get_bmu(activations)
         influence = influences[bmu]
 
@@ -322,34 +329,39 @@ class RecursiveSom(RecursiveMixin, Som):
 class RecursiveNg(RecursiveMixin, Ng):
     """Recursive version of the neural gas."""
 
-    def __init__(self,
-                 num_neurons,
-                 data_dimensionality,
-                 learning_rate,
-                 alpha,
-                 beta,
-                 influence,
-                 initializer=range_initialization,
-                 scaler=None,
-                 lr_lambda=2.5,
-                 infl_lambda=2.5):
+    def __init__(
+        self,
+        num_neurons,
+        data_dimensionality,
+        learning_rate,
+        alpha,
+        beta,
+        influence,
+        initializer=range_initialization,
+        scaler=None,
+        lr_lambda=2.5,
+        infl_lambda=2.5,
+    ):
         """Organize your gas recursively."""
-        super().__init__(num_neurons,
-                         data_dimensionality,
-                         learning_rate,
-                         influence,
-                         initializer,
-                         scaler,
-                         lr_lambda,
-                         infl_lambda)
+        super().__init__(
+            num_neurons,
+            data_dimensionality,
+            learning_rate,
+            influence,
+            initializer,
+            scaler,
+            lr_lambda,
+            infl_lambda,
+        )
 
         self.alpha = alpha
         self.beta = beta
-        self.argfunc = 'argmax'
-        self.valfunc = 'max'
+        self.argfunc = "argmax"
+        self.valfunc = "max"
 
-        self.context_weights = np.zeros((self.num_neurons, self.num_neurons),
-                                        dtype=np.float64)
+        self.context_weights = np.zeros(
+            (self.num_neurons, self.num_neurons), dtype=np.float64
+        )
 
     def backward(self, diff_x, influences, activations, **kwargs):
         """
@@ -374,7 +386,7 @@ class RecursiveNg(RecursiveMixin, Ng):
             The updates to the weights and context weights, respectively.
 
         """
-        diff_y = kwargs['diff_y']
+        diff_y = kwargs["diff_y"]
         bmu = self._get_bmu(activations)
         influence = influences[bmu]
 

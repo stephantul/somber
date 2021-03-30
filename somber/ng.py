@@ -36,35 +36,41 @@ class Ng(Base):
 
     """
 
-    def __init__(self,
-                 num_neurons,
-                 learning_rate,
-                 influence=None,
-                 data_dimensionality=None,
-                 initializer=range_initialization,
-                 scaler=Scaler(),
-                 lr_lambda=2.5,
-                 infl_lambda=2.5):
+    def __init__(
+        self,
+        num_neurons,
+        learning_rate,
+        influence=None,
+        data_dimensionality=None,
+        initializer=range_initialization,
+        scaler=Scaler(),
+        lr_lambda=2.5,
+        infl_lambda=2.5,
+    ):
         """Organize your gas."""
-        params = {'infl': {'value': influence,
-                           'factor': infl_lambda,
-                           'orig': np.sqrt(num_neurons)},
-                  'lr': {'value': learning_rate,
-                         'factor': lr_lambda,
-                         'orig': learning_rate}}
+        params = {
+            "infl": {
+                "value": influence,
+                "factor": infl_lambda,
+                "orig": np.sqrt(num_neurons),
+            },
+            "lr": {"value": learning_rate, "factor": lr_lambda, "orig": learning_rate},
+        }
 
-        super().__init__(num_neurons,
-                         data_dimensionality,
-                         params,
-                         'argmin',
-                         'min',
-                         initializer,
-                         scaler)
+        super().__init__(
+            num_neurons,
+            data_dimensionality,
+            params,
+            "argmin",
+            "min",
+            initializer,
+            scaler,
+        )
 
     def _get_bmu(self, activations):
         """Get indices of bmus, sorted by their distance from input."""
         # If the neural gas is a recursive neural gas, we need reverse argsort.
-        if self.argfunc == 'argmax':
+        if self.argfunc == "argmax":
             activations = -activations
         sort = np.argsort(activations, 1)
         return sort.argsort()
@@ -91,15 +97,17 @@ class Ng(Base):
         """
         data = json.load(open(path))
 
-        weights = data['weights']
+        weights = data["weights"]
         weights = np.asarray(weights, dtype=np.float64)
 
-        s = cls(data['num_neurons'],
-                data['data_dimensionality'],
-                data['params']['lr']['orig'],
-                influence=data['params']['infl']['orig'],
-                lr_lambda=data['params']['lr']['factor'],
-                infl_lambda=data['params']['infl']['factor'])
+        s = cls(
+            data["num_neurons"],
+            data["data_dimensionality"],
+            data["params"]["lr"]["orig"],
+            influence=data["params"]["infl"]["orig"],
+            lr_lambda=data["params"]["lr"]["factor"],
+            infl_lambda=data["params"]["infl"]["factor"],
+        )
 
         s.weights = weights
         s.trained = True

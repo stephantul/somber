@@ -57,11 +57,11 @@ class Scaler(object):
         """Transform your data to zero mean unit variance."""
         if not self.is_fit:
             raise ValueError("The scaler has not been fit yet.")
-        return (X-self.mean) / (self.std + 10e-7)
+        return (X - self.mean) / (self.std + 10e-7)
 
     def inverse_transform(self, X):
         """Invert the transformation."""
-        return ((X * self.std) + self.mean)
+        return (X * self.std) + self.mean
 
 
 def shuffle(array):

@@ -57,21 +57,25 @@ class Base(object):
     """
 
     # Static property names
-    param_names = {'num_neurons',
-                   'weights',
-                   'data_dimensionality',
-                   'params',
-                   'valfunc',
-                   'argfunc'}
+    param_names = {
+        "num_neurons",
+        "weights",
+        "data_dimensionality",
+        "params",
+        "valfunc",
+        "argfunc",
+    }
 
-    def __init__(self,
-                 num_neurons,
-                 data_dimensionality,
-                 params,
-                 argfunc="argmin",
-                 valfunc="min",
-                 initializer=range_initialization,
-                 scaler=None):
+    def __init__(
+        self,
+        num_neurons,
+        data_dimensionality,
+        params,
+        argfunc="argmin",
+        valfunc="min",
+        initializer=range_initialization,
+        scaler=None,
+    ):
         """Organize nothing."""
         self.num_neurons = np.int(num_neurons)
         self.data_dimensionality = data_dimensionality
@@ -88,15 +92,17 @@ class Base(object):
         self.params = params
         self.scaler = scaler
 
-    def fit(self,
-            X,
-            num_epochs=10,
-            updates_epoch=None,
-            stop_param_updates=dict(),
-            batch_size=1,
-            show_progressbar=False,
-            show_epoch=False,
-            refit=True):
+    def fit(
+        self,
+        X,
+        num_epochs=10,
+        updates_epoch=None,
+        stop_param_updates=dict(),
+        batch_size=1,
+        show_progressbar=False,
+        show_epoch=False,
+        refit=True,
+    ):
         """
         Fit the learner to some data.
 
@@ -124,8 +130,7 @@ class Base(object):
         """
         if self.data_dimensionality is None:
             self.data_dimensionality = X.shape[-1]
-            self.weights = np.zeros((self.num_neurons,
-                                     self.data_dimensionality))
+            self.weights = np.zeros((self.num_neurons, self.data_dimensionality))
         X = self._check_input(X)
         if not self.trained or refit:
             X = self._init_weights(X)
@@ -137,27 +142,21 @@ class Base(object):
             X_len = X.shape[0]
             updates_epoch = np.min([50, X_len // batch_size])
 
-        constants = self._pre_train(stop_param_updates,
-                                    num_epochs,
-                                    updates_epoch)
+        constants = self._pre_train(stop_param_updates, num_epochs, updates_epoch)
         start = time.time()
         for epoch in tqdm(range(num_epochs), disable=not show_epoch):
-            logger.info("Epoch {0} of {1}".format(epoch+1, num_epochs))
+            logger.info("Epoch {0} of {1}".format(epoch + 1, num_epochs))
 
-            self._epoch(X,
-                        epoch,
-                        batch_size,
-                        updates_epoch,
-                        constants,
-                        show_progressbar)
+            self._epoch(
+                X, epoch, batch_size, updates_epoch, constants, show_progressbar
+            )
 
         self.trained = True
         if self.scaler is not None:
             self.weights = self.scaler.inverse_transform(self.weights)
         logger.info("Total train time: {0}".format(time.time() - start))
 
-    def _init_weights(self,
-                      X):
+    def _init_weights(self, X):
         """Set the weights and normalize data before starting training."""
         X = np.asarray(X, dtype=np.float64)
 
@@ -168,75 +167,80 @@ class Base(object):
             self.weights = self.initializer(X, self.num_neurons)
 
         for v in self.params.values():
-            v['value'] = v['orig']
+            v["value"] = v["orig"]
 
         return X
 
-    def _pre_train(self,
-                   stop_param_updates,
-                   num_epochs,
-                   updates_epoch):
+    def _pre_train(self, stop_param_updates, num_epochs, updates_epoch):
         """Set parameters and constants before training."""
         # Calculate the total number of updates given early stopping.
-        updates = {k: stop_param_updates.get(k, num_epochs) * updates_epoch
-                   for k, v in self.params.items()}
+        updates = {
+            k: stop_param_updates.get(k, num_epochs) * updates_epoch
+            for k, v in self.params.items()
+        }
 
         # Calculate the value of a single step given the number of allowed
         # updates.
-        single_steps = {k: np.exp(-((1.0 - (1.0 / v)))
-                        * self.params[k]['factor'])
-                        for k, v in updates.items()}
+        single_steps = {
+            k: np.exp(-((1.0 - (1.0 / v))) * self.params[k]["factor"])
+            for k, v in updates.items()
+        }
 
         # Calculate the factor given the true factor and the value of a
         # single step.
-        constants = {k: np.exp(-self.params[k]['factor']) / v
-                     for k, v in single_steps.items()}
+        constants = {
+            k: np.exp(-self.params[k]["factor"]) / v for k, v in single_steps.items()
+        }
 
         return constants
 
-    def fit_predict(self,
-                    X,
-                    num_epochs=10,
-                    updates_epoch=10,
-                    stop_param_updates=dict(),
-                    batch_size=1,
-                    show_progressbar=False):
+    def fit_predict(
+        self,
+        X,
+        num_epochs=10,
+        updates_epoch=10,
+        stop_param_updates=dict(),
+        batch_size=1,
+        show_progressbar=False,
+    ):
         """First fit, then predict."""
-        self.fit(X,
-                 num_epochs,
-                 updates_epoch,
-                 stop_param_updates,
-                 batch_size,
-                 show_progressbar)
+        self.fit(
+            X,
+            num_epochs,
+            updates_epoch,
+            stop_param_updates,
+            batch_size,
+            show_progressbar,
+        )
 
         return self.predict(X, batch_size=batch_size)
 
-    def fit_transform(self,
-                      X,
-                      num_epochs=10,
-                      updates_epoch=10,
-                      stop_param_updates=dict(),
-                      batch_size=1,
-                      show_progressbar=False,
-                      show_epoch=False):
+    def fit_transform(
+        self,
+        X,
+        num_epochs=10,
+        updates_epoch=10,
+        stop_param_updates=dict(),
+        batch_size=1,
+        show_progressbar=False,
+        show_epoch=False,
+    ):
         """First fit, then transform."""
-        self.fit(X,
-                 num_epochs,
-                 updates_epoch,
-                 stop_param_updates,
-                 batch_size,
-                 show_progressbar,
-                 show_epoch)
+        self.fit(
+            X,
+            num_epochs,
+            updates_epoch,
+            stop_param_updates,
+            batch_size,
+            show_progressbar,
+            show_epoch,
+        )
 
         return self.transform(X, batch_size=batch_size)
 
-    def _epoch(self,
-               X,
-               epoch_idx,
-               batch_size,
-               updates_epoch,
-               constants,
-               show_progressbar):
+    def _epoch(
+        self, X, epoch_idx, batch_size, updates_epoch, constants, show_progressbar
+    ):
         """
         Run a single epoch.
 
@@ -288,17 +292,15 @@ class Base(object):
                 influences = self._update_params(constants)
                 logger.info(self.params)
 
-            prev = self._propagate(x,
-                                   influences,
-                                   prev_activation=prev)
+            prev = self._propagate(x, influences, prev_activation=prev)
 
     def _update_params(self, constants):
         """Update params and return new influence."""
         for k, v in constants.items():
-            self.params[k]['value'] *= v
+            self.params[k]["value"] *= v
 
-        influence = self._calculate_influence(self.params['infl']['value'])
-        return influence * self.params['lr']['value']
+        influence = self._calculate_influence(self.params["infl"]["value"])
+        return influence * self.params["lr"]["value"]
 
     def _init_prev(self, x):
         """Initialize recurrent SOMs."""
@@ -422,13 +424,15 @@ class Base(object):
             X = np.reshape(X, (1, -1))
 
         if X.ndim != 2:
-            raise ValueError("Your data is not a 2D matrix. "
-                             "Actual size: {0}".format(X.shape))
+            raise ValueError(
+                "Your data is not a 2D matrix. " "Actual size: {0}".format(X.shape)
+            )
 
         if X.shape[1] != self.data_dimensionality:
-            raise ValueError("Your data size != weight dim: {0}, "
-                             "expected {1}".format(X.shape[1],
-                                                   self.data_dimensionality))
+            raise ValueError(
+                "Your data size != weight dim: {0}, "
+                "expected {1}".format(X.shape[1], self.data_dimensionality)
+            )
         return X
 
     def transform(self, X, batch_size=100, show_progressbar=False):
@@ -465,7 +469,7 @@ class Base(object):
             activations.extend(prev)
 
         activations = np.asarray(activations, dtype=np.float64)
-        activations = activations[:X.shape[0]]
+        activations = activations[: X.shape[0]]
         return activations.reshape(X.shape[0], self.num_neurons)
 
     def predict(self, X, batch_size=1, show_progressbar=False):
@@ -518,12 +522,7 @@ class Base(object):
 
         return res
 
-    def receptive_field(self,
-                        X,
-                        identities,
-                        max_len=10,
-                        threshold=0.9,
-                        batch_size=1):
+    def receptive_field(self, X, identities, max_len=10, threshold=0.9, batch_size=1):
         """
         Calculate the receptive field of the SOM on some data.
 
@@ -563,12 +562,13 @@ class Base(object):
         predictions = self.predict(X)
 
         if len(predictions) != len(identities):
-            raise ValueError("X and identities are not the same length: "
-                             "{0} and {1}".format(len(predictions),
-                                                  len(identities)))
+            raise ValueError(
+                "X and identities are not the same length: "
+                "{0} and {1}".format(len(predictions), len(identities))
+            )
 
         for idx, p in enumerate(predictions.tolist()):
-            receptive_fields[p].append(identities[idx+1 - max_len:idx+1])
+            receptive_fields[p].append(identities[idx + 1 - max_len : idx + 1])
 
         rec = {}
 
@@ -607,17 +607,19 @@ class Base(object):
         """
         data = json.load(open(path))
 
-        weights = data['weights']
+        weights = data["weights"]
         weights = np.asarray(weights, dtype=np.float64)
 
-        s = cls(data['num_neurons'],
-                data['data_dimensionality'],
-                data['params']['lr']['orig'],
-                neighborhood=data['params']['infl']['orig'],
-                valfunc=data['valfunc'],
-                argfunc=data['argfunc'],
-                lr_lambda=data['params']['lr']['factor'],
-                nb_lambda=data['params']['nb']['factor'])
+        s = cls(
+            data["num_neurons"],
+            data["data_dimensionality"],
+            data["params"]["lr"]["orig"],
+            neighborhood=data["params"]["infl"]["orig"],
+            valfunc=data["valfunc"],
+            argfunc=data["argfunc"],
+            lr_lambda=data["params"]["lr"]["factor"],
+            nb_lambda=data["params"]["nb"]["factor"],
+        )
 
         s.weights = weights
         s.trained = True
@@ -635,4 +637,4 @@ class Base(object):
                 attr = attr.__name__
             to_save[x] = attr
 
-        json.dump(to_save, open(path, 'w'))
+        json.dump(to_save, open(path, "w"))

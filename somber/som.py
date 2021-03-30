@@ -42,14 +42,16 @@ class BaseSom(Base):
 
     """
 
-    def __init__(self,
-                 map_dimensions,
-                 data_dimensionality,
-                 params,
-                 argfunc,
-                 valfunc,
-                 initializer,
-                 scaler):
+    def __init__(
+        self,
+        map_dimensions,
+        data_dimensionality,
+        params,
+        argfunc,
+        valfunc,
+        initializer,
+        scaler,
+    ):
         """Initialize your maps."""
         # A tuple of dimensions
         # Usually (width, height), but can accomodate N-dimensional maps.
@@ -58,13 +60,15 @@ class BaseSom(Base):
         # Initialize the distance grid: only needs to be done once.
         self.distance_grid = self._initialize_distance_grid()
 
-        super().__init__(self.num_neurons,
-                         data_dimensionality,
-                         params,
-                         'argmin',
-                         'min',
-                         initializer,
-                         scaler)
+        super().__init__(
+            self.num_neurons,
+            data_dimensionality,
+            params,
+            "argmin",
+            "min",
+            initializer,
+            scaler,
+        )
 
     def _init_prev(self, x):
         """Initialize recurrent SOMs."""
@@ -110,7 +114,7 @@ class BaseSom(Base):
         coord = []
         for idx, dim in enumerate(dimensions):
             if idx != 0:
-                value = (index % dimensions[idx-1]) // dim
+                value = (index % dimensions[idx - 1]) // dim
             else:
                 value = index // dim
             coord.append(value)
@@ -210,19 +214,13 @@ class BaseSom(Base):
             dists_per_neuron[x].append(y[x])
 
         out = np.zeros(self.num_neurons)
-        average_spread = {k: np.mean(v)
-                          for k, v in dists_per_neuron.items()}
+        average_spread = {k: np.mean(v) for k, v in dists_per_neuron.items()}
 
         for x, y in average_spread.items():
             out[x] = y
         return out
 
-    def receptive_field(self,
-                        X,
-                        identities,
-                        max_len=10,
-                        threshold=0.9,
-                        batch_size=1):
+    def receptive_field(self, X, identities, max_len=10, threshold=0.9, batch_size=1):
         """
         Calculate the receptive field of the SOM on some data.
 
@@ -261,11 +259,13 @@ class BaseSom(Base):
         predictions = self.predict(X, batch_size)
 
         if len(predictions) != len(identities):
-            raise ValueError("X and identities are not the same length: "
-                             "{0} and {1}".format(len(X), len(identities)))
+            raise ValueError(
+                "X and identities are not the same length: "
+                "{0} and {1}".format(len(X), len(identities))
+            )
 
         for idx, p in enumerate(predictions.tolist()):
-            receptive_fields[p].append(identities[idx+1 - max_len:idx+1])
+            receptive_fields[p].append(identities[idx + 1 - max_len : idx + 1])
 
         rec = {}
 
@@ -313,8 +313,10 @@ class BaseSom(Base):
         distances = self.transform(X)
 
         if len(distances) != len(identities):
-            raise ValueError("X and identities are not the same length: "
-                             "{0} and {1}".format(len(X), len(identities)))
+            raise ValueError(
+                "X and identities are not the same length: "
+                "{0} and {1}".format(len(X), len(identities))
+            )
 
         node_match = []
 
@@ -349,9 +351,7 @@ class BaseSom(Base):
             second_dim = 1
 
         # Reshape to appropriate dimensions
-        return self.weights.reshape((first_dim,
-                                     second_dim,
-                                     self.data_dimensionality))
+        return self.weights.reshape((first_dim, second_dim, self.data_dimensionality))
 
 
 class Som(BaseSom):
@@ -406,20 +406,19 @@ class Som(BaseSom):
     """
 
     # Static property names
-    param_names = {'map_dimensions',
-                   'weights',
-                   'data_dimensionality',
-                   'params'}
+    param_names = {"map_dimensions", "weights", "data_dimensionality", "params"}
 
-    def __init__(self,
-                 map_dimensions,
-                 learning_rate,
-                 data_dimensionality=None,
-                 influence=None,
-                 initializer=range_initialization,
-                 scaler=None,
-                 lr_lambda=2.5,
-                 infl_lambda=2.5):
+    def __init__(
+        self,
+        map_dimensions,
+        learning_rate,
+        data_dimensionality=None,
+        influence=None,
+        initializer=range_initialization,
+        scaler=None,
+        lr_lambda=2.5,
+        infl_lambda=2.5,
+    ):
         """Organize your maps."""
         if influence is None:
             # Add small constant to sigma to prevent
@@ -428,20 +427,20 @@ class Som(BaseSom):
             influence = max(map_dimensions) / 2
             influence += 0.0001
 
-        params = {'infl': {'value': influence,
-                           'factor': infl_lambda,
-                           'orig': influence},
-                  'lr': {'value': learning_rate,
-                         'factor': lr_lambda,
-                         'orig': learning_rate}}
+        params = {
+            "infl": {"value": influence, "factor": infl_lambda, "orig": influence},
+            "lr": {"value": learning_rate, "factor": lr_lambda, "orig": learning_rate},
+        }
 
-        super().__init__(map_dimensions,
-                         data_dimensionality,
-                         params,
-                         'argmin',
-                         'min',
-                         initializer,
-                         scaler)
+        super().__init__(
+            map_dimensions,
+            data_dimensionality,
+            params,
+            "argmin",
+            "min",
+            initializer,
+            scaler,
+        )
 
     @classmethod
     def load(cls, path):
@@ -461,15 +460,17 @@ class Som(BaseSom):
         """
         data = json.load(open(path))
 
-        weights = data['weights']
+        weights = data["weights"]
         weights = np.asarray(weights, dtype=np.float64)
 
-        s = cls(data['map_dimensions'],
-                data['params']['lr']['orig'],
-                data['data_dimensionality'],
-                influence=data['params']['infl']['orig'],
-                lr_lambda=data['params']['lr']['factor'],
-                infl_lambda=data['params']['infl']['factor'])
+        s = cls(
+            data["map_dimensions"],
+            data["params"]["lr"]["orig"],
+            data["data_dimensionality"],
+            influence=data["params"]["infl"]["orig"],
+            lr_lambda=data["params"]["lr"]["factor"],
+            infl_lambda=data["params"]["infl"]["factor"],
+        )
 
         s.weights = weights
         s.trained = True

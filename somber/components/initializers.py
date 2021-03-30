@@ -33,5 +33,4 @@ def range_initialization(X, num_weights):
     min_val, max_val = X_.min(0), X_.max(0)
     data_range = max_val - min_val
 
-    return data_range * np.random.rand(num_weights,
-                                       X.shape[-1]) + min_val
+    return data_range * np.random.rand(num_weights, X.shape[-1]) + min_val
