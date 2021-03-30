@@ -332,12 +332,7 @@ class Base(object):
         """Propagate a single batch of examples through the network."""
         activation, difference_x = self.forward(x)
         update = self.backward(difference_x, influences, activation)
-        # If batch size is 1 we can leave out the call to mean.
-        if update.shape[0] == 1:
-            self.weights += update[0]
-        else:
-            self.weights += update.mean(0)
-
+        self.weights += update.mean(0)
         return activation
 
     def forward(self, x, **kwargs):
@@ -386,7 +381,7 @@ class Base(object):
         """
         bmu = self._get_bmu(activations)
         influence = influences[bmu]
-        update = np.multiply(diff_x, influence)
+        update = influence[:, :, None] * diff_x
         return update
 
     def distance_function(self, x, weights):

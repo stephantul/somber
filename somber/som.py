@@ -93,7 +93,7 @@ class BaseSom(Base):
 
         """
         grid = np.exp(-self.distance_grid / (neighborhood ** 2))
-        return grid.reshape(self.num_neurons, self.num_neurons)[:, :, None]
+        return grid.reshape(self.num_neurons, self.num_neurons)
 
     def _initialize_distance_grid(self):
         """Initialize the distance grid by calls to _grid_distance."""
