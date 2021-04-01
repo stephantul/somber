@@ -1,53 +1,43 @@
 """Neural gas."""
-import numpy as np
 import json
-from .base import Base
-from .components.utilities import Scaler
-from .components.initializers import range_initialization
+from typing import Callable, Optional
+
+import numpy as np
+
+from somber.base import Base, _T
+from somber.components.initializers import range_initialization
+from somber.components.utilities import Scaler
 
 
 class Ng(Base):
-    """
-    Neural gas.
-
-    Parameters
-    ----------
-    num_neurons : int
-        The number of neurons in the neural gas.
-    learning_rate : float
-        The starting learning rate.
-    influence : float, default None
-        The starting influence. Sane value is sqrt(num_neurons).
-    data_dimensionality : int, default None
-        The dimensionality of your input data.
-    initializer : function, optional, default range_initialization
-        A function which takes in the input data and weight matrix and returns
-        an initialized weight matrix. The initializers are defined in
-        somber.components.initializers. Can be set to None.
-    scaler : initialized Scaler instance, optional default Scaler()
-        An initialized instance of Scaler() which is used to scale the data
-        to have mean 0 and stdev 1.
-    lr_lambda : float
-        Controls the steepness of the exponential function that decreases
-        the learning rate.
-    nb_lambda : float
-        Controls the steepness of the exponential function that decreases
-        the neighborhood.
-
-    """
-
     def __init__(
         self,
-        num_neurons,
-        learning_rate,
-        influence=None,
-        data_dimensionality=None,
-        initializer=range_initialization,
-        scaler=Scaler(),
-        lr_lambda=2.5,
-        infl_lambda=2.5,
-    ):
-        """Organize your gas."""
+        num_neurons: int,
+        learning_rate: float,
+        influence: Optional[float] = None,
+        data_dimensionality: Optional[int] = None,
+        initializer: Callable = range_initialization,
+        scaler: Scaler = None,
+        lr_lambda: float = 2.5,
+        infl_lambda: float = 2.5,
+    ) -> None:
+        """
+        Organize your gas.
+
+        :param num_neurons: The number of neurons in the neural gas.
+        :param learning_rate: The starting learning rate.
+        :param influence: The starting influence. Sane value is sqrt(num_neurons).
+        :param data_dimensionality: The dimensionality of your input data.
+        :param initializer: A function which takes in the input data and weight matrix
+            and returns an initialized weight matrix. The initializers are defined in
+            somber.components.initializers. Can be set to None.
+        :param scaler: An initialized instance of Scaler() which is used to scale the
+            data to have mean 0 and stdev 1.
+        :param lr_lambda: Controls the steepness of the exponential function that
+            decreases the learning rate.
+        :param nb_lambda: Controls the steepness of the exponential function that
+            decreases the neighborhood.
+        """
         params = {
             "infl": {
                 "value": influence,
@@ -67,7 +57,7 @@ class Ng(Base):
             scaler,
         )
 
-    def _get_bmu(self, activations):
+    def _get_bmu(self, activations: np.ndarray) -> np.ndarray:
         """Get indices of bmus, sorted by their distance from input."""
         # If the neural gas is a recursive neural gas, we need reverse argsort.
         if self.argfunc == "argmax":
@@ -75,25 +65,17 @@ class Ng(Base):
         sort = np.argsort(activations, 1)
         return sort.argsort()
 
-    def _calculate_influence(self, influence_lambda):
+    def _calculate_influence(self, influence_lambda: float) -> np.ndarray:
         """Calculate the ranking influence."""
         return np.exp(-np.arange(self.num_neurons) / influence_lambda)[:, None]
 
     @classmethod
-    def load(cls, path):
+    def load(cls, path: str) -> _T:
         """
         Load a Neural Gas from a JSON file saved with this package.
 
-        Parameters
-        ----------
-        path : str
-            The path to the JSON file.
-
-        Returns
-        -------
-        s : cls
-            A neural gas.
-
+        :param path: The path to the JSON file.
+        :return: A neural gas.
         """
         data = json.load(open(path))
 

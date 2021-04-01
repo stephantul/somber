@@ -1,15 +1,18 @@
 """The sequential SOMs."""
-import logging
-
 import json
-import numpy as np
-
-from tqdm import tqdm
-from .som import Som
-from .ng import Ng
-from .components.utilities import shuffle
-from .components.initializers import range_initialization
+import logging
 from functools import reduce
+from typing import Callable, List, Optional, Tuple
+
+import numpy as np
+from tqdm import tqdm
+
+from somber.components.utilities import shuffle
+from somber.components.initializers import range_initialization
+from somber.ng import Ng
+from somber.som import Som
+from somber.base import _T
+
 
 logger = logging.getLogger(__name__)
 
@@ -17,11 +20,13 @@ logger = logging.getLogger(__name__)
 class SequentialMixin(object):
     """A base class for sequential SOMs, removing some code duplication."""
 
-    def _init_prev(self, X):
+    def _init_prev(self, X: np.ndarray) -> np.ndarray:
         """Initialize the context vector for recurrent SOMs."""
         return np.zeros((X.shape[1], self.num_neurons))
 
-    def _create_batches(self, X, batch_size, shuffle_data=False):
+    def _create_batches(
+        self, X: np.ndarray, batch_size: int, shuffle_data: bool = False
+    ) -> np.ndarray:
         """
         Create batches out of a sequence of data.
 
@@ -38,14 +43,11 @@ class SequentialMixin(object):
         # This line first resizes the data to
         X = np.resize(X, (batch_size, max_x, X.shape[1]))
         # Transposes it to (len(X) / batch_size, batch_size, data_dim)
-
         return X.transpose((1, 0, 2))
 
-    def forward(self, x, **kwargs):
-        """Do a forward pass."""
-        raise ValueError("Base class.")
-
-    def predict_distance(self, X, batch_size=1, show_progressbar=False):
+    def predict_distance(
+        self, X: np.ndarray, batch_size: int = 1, show_progressbar: bool = False
+    ) -> np.ndarray:
         """Predict distances to some input data."""
         X = self._check_input(X)
 
@@ -65,7 +67,7 @@ class SequentialMixin(object):
         act = act[:X_shape]
         return act.reshape(X_shape, self.num_neurons)
 
-    def generate(self, num_to_generate, starting_place):
+    def generate(self, num_to_generate: int, starting_place: np.ndarray) -> List[int]:
         """Generate data based on some initial position."""
         res = []
         activ = starting_place[None, :]
@@ -81,57 +83,6 @@ class SequentialMixin(object):
 
 
 class RecursiveMixin(SequentialMixin):
-    """
-    A recursive Mixin.
-
-    A recursive model models sequences through context dependence by not only
-    storing the exemplars in weights, but also storing which exemplars
-    preceded them. Because of this organization, the SOM can recursively
-    "remember" short sequences, which makes it attractive for simple
-    sequence problems, e.g. characters or words.
-
-    Parameters
-    ----------
-    map_dimensions : tuple
-        A tuple describing the map size. For example, (10, 10) will create
-        a 10 * 10 map with 100 neurons, while a (10, 10, 10) map with 1000
-        neurons creates a 10 * 10 * 10 map with 1000 neurons.
-    learning_rate : float
-        The starting learning rate h0.
-    data_dimensionality : int, default None
-        The dimensionality of the input data.
-    neighborhood : float, optional, default None.
-        The starting neighborhood n0. If left at None, the value will be
-        calculated as max(map_dimensions) / 2. This value might not be
-        optimal for maps with more than 2 dimensions.
-    initializer : function, optional, default range_initialization
-        A function which takes in the input data and weight matrix and Returns
-        an initialized weight matrix. The initializers are defined in
-        somber.components.initializers. Can be set to None.
-    scaler : initialized Scaler instance, optional default None
-        An initialized instance of None which is used to scale the data
-        to have mean 0 and stdev 1.
-    lr_lambda : float
-        Controls the steepness of the exponential function that decreases
-        the learning rate.
-    nb_lambda : float
-        Controls the steepness of the exponential function that decreases
-        the neighborhood.
-
-    Attributes
-    ----------
-    trained : bool
-        Whether the som has been trained.
-    num_neurons : int
-        The dimensionality of the weight matrix, i.e. the number of
-        neurons on the map.
-    distance_grid : numpy array
-        An array which contains the distance from each neuron to each
-        other neuron.
-    context_weights : numpy array
-        The weights which store the context dependence of the neurons.
-
-    """
 
     param_names = {
         "data_dimensionality",
@@ -145,10 +96,10 @@ class RecursiveMixin(SequentialMixin):
         "beta",
     }
 
-    def _propagate(self, x, influences, **kwargs):
-        prev = kwargs["prev_activation"]
-
-        activation, diff_x, diff_y = self.forward(x, prev_activation=prev)
+    def _propagate(
+        self, x: np.ndarray, influences: np.ndarray, prev_activation: np.ndarray
+    ) -> np.ndarray:
+        activation, diff_x, diff_y = self.forward(x, prev_activation=prev_activation)
         x_update, y_update = self.backward(
             diff_x, influences, activation, diff_y=diff_y
         )
@@ -165,34 +116,27 @@ class RecursiveMixin(SequentialMixin):
 
         return activation
 
-    def forward(self, x, **kwargs):
+    def forward(
+        self, x: np.ndarray, prev_activation: np.ndarray
+    ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
         """
         Perform a forward pass through the network.
 
         The forward pass in recursive som is based on a combination between
         the activation in the last time-step and the current time-step.
 
-        Parameters
-        ----------
-        x : numpy array
-            The input data.
-        prev_activation : numpy array.
-            The activation of the network in the previous time-step.
-
-        Returns
-        -------
-        activations : tuple of activations and differences
-            A tuple containing the activation of each unit, the differences
+        :param x: The input data.
+        :param prev_activation: The activation of the network in the previous time-step.
+        :return: A tuple containing the activation of each unit, the differences
             between the weights and input and the differences between the
             context input and context weights.
-
         """
-        prev = kwargs["prev_activation"]
-
         # Differences is the components of the weights subtracted from
         # the weight vector.
         distance_x, diff_x = self.distance_function(x, self.weights)
-        distance_y, diff_y = self.distance_function(prev, self.context_weights)
+        distance_y, diff_y = self.distance_function(
+            prev_activation, self.context_weights
+        )
 
         x_ = distance_x * self.alpha
         y_ = distance_y * self.beta
@@ -201,23 +145,15 @@ class RecursiveMixin(SequentialMixin):
         return activation, diff_x, diff_y
 
     @classmethod
-    def load(cls, path):
+    def load(cls, path: str) -> _T:
         """
         Load a recursive SOM from a JSON file.
 
         You can use this function to load weights of other SOMs.
         If there are no context weights, they will be set to 0.
 
-        Parameters
-        ----------
-        path : str
-            The path to the JSON file.
-
-        Returns
-        -------
-        s : cls
-            A som of the specified class.
-
+        :param path: The path to the JSON file.
+        :param return: A som of the specified class
         """
         data = json.load(open(path))
 
@@ -260,17 +196,16 @@ class RecursiveSom(RecursiveMixin, Som):
 
     def __init__(
         self,
-        map_dimensions,
-        learning_rate,
-        alpha,
-        beta,
-        data_dimensionality=None,
-        influence=None,
-        initializer=range_initialization,
-        scaler=None,
-        lr_lambda=2.5,
-        infl_lambda=2.5,
-    ):
+        map_dimensions: Tuple[int],
+        learning_rate: float,
+        alpha: float,
+        beta: float,
+        data_dimensionality: Optional[int] = None,
+        influence: Optional[float] = None,
+        initializer: Optional[Callable] = range_initialization,
+        lr_lambda: float = 2.5,
+        infl_lambda: float = 2.5,
+    ) -> None:
         """Organize your maps recursively."""
         super().__init__(
             map_dimensions,
@@ -278,7 +213,6 @@ class RecursiveSom(RecursiveMixin, Som):
             data_dimensionality,
             influence,
             initializer,
-            scaler,
             lr_lambda,
             infl_lambda,
         )
@@ -292,30 +226,18 @@ class RecursiveSom(RecursiveMixin, Som):
             (self.num_neurons, self.num_neurons), dtype=np.float64
         )
 
-    def backward(self, diff_x, influences, activations, **kwargs):
+    def backward(self, diff_x, influences, activations, diff_y) -> np.ndarray:
         """
         Backward pass through the network, including update.
 
-        Parameters
-        ----------
-        diff_x : numpy array
-            A matrix containing the differences between the input and neurons.
-        influences : numpy array
-            A matrix containing the influence each neuron has on each
+        :param diff_x: A matrix containing the differences between the input and neurons.
+        :param influences: A matrix containing the influence each neuron has on each
             other neuron. This is used to calculate the updates.
-        activations : numpy array
-            The activations each neuron has to each data point. This is used
+        :param activations: The activations each neuron has to each data point. This is used
             to calculate the BMU.
-        differency_y : numpy array
-            The differences between the input and context neurons.
-
-        Returns
-        -------
-        updates : tuple of arrays
-            The updates to the weights and context weights, respectively.
-
+        :param diff_y: The differences between the input and context neurons.
+        :return: The updates to the weights and context weights, respectively.
         """
-        diff_y = kwargs["diff_y"]
         bmu = self._get_bmu(activations)
         influence = influences[bmu]
 
@@ -331,16 +253,15 @@ class RecursiveNg(RecursiveMixin, Ng):
 
     def __init__(
         self,
-        num_neurons,
-        data_dimensionality,
-        learning_rate,
-        alpha,
-        beta,
-        influence,
-        initializer=range_initialization,
-        scaler=None,
-        lr_lambda=2.5,
-        infl_lambda=2.5,
+        num_neurons: int,
+        data_dimensionality: int,
+        learning_rate: float,
+        alpha: float,
+        beta: float,
+        influence: float,
+        initializer: Optional[Callable] = range_initialization,
+        lr_lambda: float = 2.5,
+        infl_lambda: float = 2.5,
     ):
         """Organize your gas recursively."""
         super().__init__(
@@ -349,7 +270,6 @@ class RecursiveNg(RecursiveMixin, Ng):
             learning_rate,
             influence,
             initializer,
-            scaler,
             lr_lambda,
             infl_lambda,
         )
@@ -363,30 +283,24 @@ class RecursiveNg(RecursiveMixin, Ng):
             (self.num_neurons, self.num_neurons), dtype=np.float64
         )
 
-    def backward(self, diff_x, influences, activations, **kwargs):
+    def backward(
+        self,
+        diff_x: np.ndarray,
+        influences: np.ndarray,
+        activations: np.ndarray,
+        diff_y: np.ndarray,
+    ) -> Tuple[np.ndarray, np.ndarray]:
         """
         Backward pass through the network, including update.
 
-        Parameters
-        ----------
-        diff_x : numpy array
-            A matrix containing the differences between the input and neurons.
-        influences : numpy array
-            A matrix containing the influence each neuron has on each
+        :param diff_x: A matrix containing the differences between the input and neurons.
+        :param influences: A matrix containing the influence each neuron has on each
             other neuron. This is used to calculate the updates.
-        activations : numpy array
-            The activations each neuron has to each data point. This is used
-            to calculate the BMU.
-        differency_y : numpy array
-            The differences between the input and context neurons.
-
-        Returns
-        -------
-        updates : tuple of arrays
-            The updates to the weights and context weights, respectively.
-
+        :param activations: The activations each neuron has to each data point. This is
+            used to calculate the BMU.
+        :param diff_y: The differences between the input and context neurons.
+        :return: The updates to the weights and context weights, respectively.
         """
-        diff_y = kwargs["diff_y"]
         bmu = self._get_bmu(activations)
         influence = influences[bmu]
 

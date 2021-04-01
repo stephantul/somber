@@ -1,56 +1,29 @@
 """The standard SOM."""
-import logging
 import json
+import logging
+from collections import Counter, defaultdict
+from typing import Callable, Dict, List, Optional, Tuple
+
 import numpy as np
 
-from .components.initializers import range_initialization
-from collections import Counter, defaultdict
-from .base import Base
+from somber.base import Base, _T
+from somber.components.initializers import range_initialization
+from somber.components.utilities import Scaler
 
 
 logger = logging.getLogger(__name__)
 
 
 class BaseSom(Base):
-    """
-    Base class of the classic SOM.
-
-    Parameters
-    ----------
-    map_dimensions : tuple
-        A tuple describing the map size. For example, (10, 10) will create
-        a 10 * 10 map with 100 neurons, while a (10, 10, 10) map with 1000
-        neurons creates a 10 * 10 * 10 map with 1000 neurons.
-    data_dimensionality : int
-        The dimensionality of the input data.
-    params : dict
-        The dictionary of parameters to update. Each value of each entry in the
-        the dictionary is also a dictionary with three keys.
-    argfunc : str
-        The name of the function which is used for calculating the index of
-        the BMU.
-    valfunc : str
-        The name of the function which is used for calculating the value of the
-        BMU.
-    initializer : function
-        A function which takes in the input data and weight matrix and Returns
-        an initialized weight matrix. The initializers are defined in
-        somber.components.initializers. Can be set to None.
-    scaler : initialized Scaler instance
-        An initialized instance of Scaler() which is used to scale the data
-        to have mean 0 and stdev 1.
-
-    """
-
     def __init__(
         self,
-        map_dimensions,
-        data_dimensionality,
-        params,
-        argfunc,
-        valfunc,
-        initializer,
-        scaler,
+        map_dimensions: int,
+        data_dimensionality: Optional[int],
+        params: Dict[str, float],
+        argfunc: str,
+        valfunc: str,
+        initializer: Callable,
+        scaler: Scaler,
     ):
         """Initialize your maps."""
         # A tuple of dimensions
@@ -70,37 +43,29 @@ class BaseSom(Base):
             scaler,
         )
 
-    def _init_prev(self, x):
+    def _init_prev(self, x: np.ndarray) -> Optional[np.ndarray]:
         """Initialize recurrent SOMs."""
         return None
 
-    def _calculate_influence(self, neighborhood):
+    def _calculate_influence(self, sigma: float) -> np.ndarray:
         """
         Pre-calculate the influence for a given value of sigma.
 
         The neighborhood has size num_neurons * num_neurons, so for a
         30 * 30 map, the neighborhood will be size (900, 900).
 
-        Parameters
-        ----------
-        neighborhood : float
-            The neighborhood value.
-
-        Returns
-        -------
-        neighborhood : numpy array
-            The influence from each neuron to each other neuron.
-
+        :param sigma: The neighborhood value.
+        :return: The influence from each neuron to each other neuron.
         """
-        grid = np.exp(-self.distance_grid / (neighborhood ** 2))
+        grid = np.exp(-self.distance_grid / (sigma ** 2))
         return grid.reshape(self.num_neurons, self.num_neurons)
 
-    def _initialize_distance_grid(self):
+    def _initialize_distance_grid(self) -> np.ndarray:
         """Initialize the distance grid by calls to _grid_distance."""
         p = [self._grid_distance(i) for i in range(self.num_neurons)]
         return np.array(p)
 
-    def _grid_distance(self, index):
+    def _grid_distance(self, index: int) -> np.ndarray:
         """
         Calculate the distance grid for a single index position.
 
@@ -134,7 +99,7 @@ class BaseSom(Base):
 
         return distance
 
-    def topographic_error(self, X, batch_size=1):
+    def topographic_error(self, X: np.ndarray, batch_size: int = 32) -> np.ndarray:
         """
         Calculate the topographic error.
 
@@ -146,19 +111,9 @@ class BaseSom(Base):
         Formally, the topographic error is the proportion of units for which
         the two most similar neurons are not direct neighbors on the map.
 
-        Parameters
-        ----------
-        X : numpy array.
-            The input data.
-        batch_size : int
-            The batch size to use when calculating the topographic error.
-
-        Returns
-        -------
-        error : numpy array
-            A vector of numbers, representing the topographic error
-            for each data point.
-
+        :param X: The input data.
+        :param batch_size: The batch size to use when calculating the topographic error.
+        :return: A vector representing the topographic error for each data point.
         """
         dist = self.transform(X, batch_size)
         # Sort the distances and get the indices of the two smallest distances
@@ -171,14 +126,16 @@ class BaseSom(Base):
         # Subtract 1.0 because 1.0 is the smallest distance.
         return np.sum(res > 1.0) / len(res)
 
-    def neighbors(self, distance=2.0):
+    def neighbors(self, distance: float = 2.0) -> List[Tuple[int, int]]:
         """Get all neighbors for all neurons."""
         dgrid = self.distance_grid.reshape(self.num_neurons, self.num_neurons)
+        result = []
         for x, y in zip(*np.nonzero(dgrid <= distance)):
             if x != y:
-                yield x, y
+                result.append((x, y))
+        return result
 
-    def neighbor_difference(self):
+    def neighbor_difference(self) -> np.ndarray:
         """Get the euclidean distance between a node and its neighbors."""
         differences = np.zeros(self.num_neurons)
         num_neighbors = np.zeros(self.num_neurons)
@@ -190,23 +147,15 @@ class BaseSom(Base):
 
         return differences / num_neighbors
 
-    def spread(self, X):
+    def spread(self, X: np.ndarray) -> np.ndarray:
         """
         Calculate the average spread for each node.
 
         The average spread is a measure of how far each neuron is from the
         data points which cluster to it.
 
-        Parameters
-        ----------
-        X : numpy array
-            The input data.
-
-        Returns
-        -------
-        spread : numpy array
-            The average distance from each neuron to each data point.
-
+        :param X: numpy array
+        :return: The average distance from each neuron to each data point.
         """
         distance, _ = self.distance_function(X, self.weights)
         dists_per_neuron = defaultdict(list)
@@ -220,7 +169,14 @@ class BaseSom(Base):
             out[x] = y
         return out
 
-    def receptive_field(self, X, identities, max_len=10, threshold=0.9, batch_size=1):
+    def receptive_field(
+        self,
+        X: np.ndarray,
+        identities: List[str],
+        max_len: int = 10,
+        threshold: float = 0.9,
+        batch_size: int = 1,
+    ) -> Dict[int, List[str]]:
         """
         Calculate the receptive field of the SOM on some data.
 
@@ -229,31 +185,18 @@ class BaseSom(Base):
         specific sequences, it will have longer receptive fields, and therefore
         gives a better description of the dynamics of a given system.
 
-        Parameters
-        ----------
-        X : numpy array
-            Input data.
-        identities : list
-            A list of symbolic identities associated with each input.
+        :param X: Input data.
+        :param identities: A list of symbolic identities associated with each input.
             We expect this list to be as long as the input data.
-        max_len : int, optional, default 10
-            The maximum length to attempt to find. Raising this increases
+        :param max_len: The maximum length to attempt to find. Raising this increases
             memory use.
-        threshold : float, optional, default .9
-            The threshold at which we consider a receptive field
-            valid. If at least this proportion of the sequences of a neuron
-            have the same suffix, that suffix is counted as acquired by the
-            SOM.
-        batch_size : int, optional, default 1
-            The batch size to use in prediction
+        :param threshold: The threshold at which we consider a receptive field valid.
+            If at least this proportion of the sequences of a neuron have the same
+            suffix, that suffix is counted as acquired by the SOM.
+        :param batch_size: The batch size to use in prediction
 
-        Returns
-        -------
-        receptive_fields : dict
-            A dictionary mapping from the neuron id to the found sequences
-            for that neuron. The sequences are represented as lists of
-            symbols from identities.
-
+        :return: A dictionary mapping from the neuron id to the found sequences for that
+            neuron. The sequences are represented as lists of symbols from identities.
         """
         receptive_fields = defaultdict(list)
         predictions = self.predict(X, batch_size)
@@ -261,7 +204,7 @@ class BaseSom(Base):
         if len(predictions) != len(identities):
             raise ValueError(
                 "X and identities are not the same length: "
-                "{0} and {1}".format(len(X), len(identities))
+                f"{len(X)} and {len(identities)}"
             )
 
         for idx, p in enumerate(predictions):
@@ -286,7 +229,7 @@ class BaseSom(Base):
 
         return rec
 
-    def invert_projection(self, X, identities):
+    def invert_projection(self, X: np.ndarray, identities: List[str]) -> np.ndarray:
         """
         Calculate the inverted projection.
 
@@ -296,36 +239,26 @@ class BaseSom(Base):
 
         Works best for symbolic (instead of continuous) input data.
 
-        Parameters
-        ----------
-        X : numpy array
-            Input data
-        identities : list
-            A list of names for each of the input data. Must be the same
-            length as X.
-
-        Returns
-        -------
-        m : numpy array
-            An array with the same shape as the map
-
+        :param X: Input data
+        :param identities: A list of names for each of the input data. Must be the same
+        length as X.
+        :return: An array with the same form as the map.
         """
         distances = self.transform(X)
 
         if len(distances) != len(identities):
             raise ValueError(
                 "X and identities are not the same length: "
-                "{0} and {1}".format(len(X), len(identities))
+                f"{len(X)} and {len(identities)}"
             )
 
         node_match = []
-
         for d in distances.__getattribute__(self.argfunc)(0):
             node_match.append(identities[d])
 
         return np.array(node_match)
 
-    def map_weights(self):
+    def map_weights(self) -> np.ndarray:
         """
         Reshaped weights for visualization.
 
@@ -337,12 +270,7 @@ class BaseSom(Base):
         For one-dimensional SOMs, the returned array is of shape
         (W.shape[0], 1, W.shape[2])
 
-        Returns
-        -------
-        w : numpy array
-            A three-dimensional array containing the weights in a
-            2D array for easy visualization.
-
+        :return: The reshaped weights.
         """
         first_dim = self.map_dimensions[0]
         if len(self.map_dimensions) != 1:
@@ -355,71 +283,42 @@ class BaseSom(Base):
 
 
 class Som(BaseSom):
-    """
-    This is a batched version of the basic SOM.
-
-    Parameters
-    ----------
-    map_dimensions : tuple
-        A tuple describing the map size. For example, (10, 10) will create
-        a 10 * 10 map with 100 neurons, while a (10, 10, 10) map with 1000
-        neurons creates a 10 * 10 * 10 map with 1000 neurons.
-    learning_rate : float
-        The starting learning rate h0.
-    data_dimensionality : int, default None
-        The dimensionality of the input data.
-    neighborhood : float, optional, default None.
-        The starting neighborhood n0. If left at None, the value will be
-        calculated as max(map_dimensions) / 2. This value might not be
-        optimal for maps with more than 2 dimensions.
-    argfunc : str, optional, default "argmin"
-        The name of the function which is used for calculating the index of
-        the BMU.
-    valfunc : str, optional, default "min"
-        The name of the function which is used for calculating the value of the
-        BMU.
-    initializer : function, optional, default range_initialization
-        A function which takes in the input data and weight matrix and Returns
-        an initialized weight matrix. The initializers are defined in
-        somber.components.initializers. Can be set to None.
-    scaler : initialized Scaler instance, optional default None
-        An initialized instance of Scaler() which is used to scale the data
-        to have mean 0 and stdev 1.
-    lr_lambda : float
-        Controls the steepness of the exponential function that decreases
-        the learning rate.
-    infl_lambda : float
-        Controls the steepness of the exponential function that decreases
-        the neighborhood.
-
-    Attributes
-    ----------
-    trained : bool
-        Whether the som has been trained.
-    num_neurons : int
-        The dimensionality of the weight matrix, i.e. the number of
-        neurons on the map.
-    distance_grid : numpy array
-        An array which contains the distance from each neuron to each
-        other neuron.
-
-    """
 
     # Static property names
     param_names = {"map_dimensions", "weights", "data_dimensionality", "params"}
 
     def __init__(
         self,
-        map_dimensions,
-        learning_rate,
-        data_dimensionality=None,
-        influence=None,
-        initializer=range_initialization,
-        scaler=None,
-        lr_lambda=2.5,
-        infl_lambda=2.5,
+        map_dimensions: Tuple[int],
+        learning_rate: float,
+        data_dimensionality: Optional[int] = None,
+        influence: Optional[float] = None,
+        initializer: Optional[Callable] = range_initialization,
+        scaler: Optional[Scaler] = None,
+        lr_lambda: float = 2.5,
+        infl_lambda: float = 2.5,
     ):
-        """Organize your maps."""
+        """
+        Organize your maps.
+
+        This is a batched version of the basic SOM.
+
+        :param map_dimensions: A tuple describing the map size. For example, (10, 10)
+            will create a 10 * 10 map with 100 neurons, while a (10, 10, 10) map creates
+            a 10 * 10 * 10 map with 1000 neurons.
+        :param learning_rate: The starting learning rate h0.
+        :param data_dimensionality: The dimensionality of the input data.
+        :param influence: The influence. If left to None, this will be set to max(map_dimensions) / 2
+        :param initializer: A function which takes in the input data and weight matrix
+            and returns an initialized weight matrix. The initializers are defined in
+            somber.components.initializers. Can be set to None.
+        :param scaler: An initialized instance of Scaler() which is used to scale the
+            data to have mean 0 and stdev 1.
+        :param lr_lambda: Controls the steepness of the exponential function that
+            decreases the learning rate.
+        :param infl_lambda: Controls the steepness of the exponential function that
+            decreases the neighborhood.
+        """
         if influence is None:
             # Add small constant to sigma to prevent
             # divide by zero for maps with the same max_dim as the number
@@ -443,20 +342,12 @@ class Som(BaseSom):
         )
 
     @classmethod
-    def load(cls, path):
+    def load(cls, path: str) -> _T:
         """
-        Load a SOM from a JSON file saved with this package..
+        Load a SOM from a JSON file saved with this package.
 
-        Parameters
-        ----------
-        path : str
-            The path to the JSON file.
-
-        Returns
-        -------
-        s : cls
-            A som of the specified class.
-
+        :param path: The path to the JSON file.
+        :return: A som of the specified class.
         """
         data = json.load(open(path))
 
