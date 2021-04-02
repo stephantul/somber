@@ -1,4 +1,4 @@
-numpy==1.19.1
+numpy==1.19.2
 tqdm==4.48.2
 setuptools==50.3.0
 Cython==0.29.21
